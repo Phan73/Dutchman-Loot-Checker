@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
 import re
+import io
 
-# --- LANGUAGE DICTIONARY ---
+# --- LANGUAGE DICTIONARY (PRESERVED EXACTLY) ---
 LANGS = {
     "한국어": {
         "title": "🛡️ 길드 전리품 감사 도구",
@@ -61,128 +62,93 @@ LANGS = {
 }
 
 st.set_page_config(page_title="Flying Dutchman Auditor", layout="wide")
-
-# Language Selector
 sel_lang = st.sidebar.selectbox("🌐 Language / 언어 선택", ["한국어", "English"])
 T = LANGS[sel_lang]
 
 st.title(T["title"])
-
-# Detailed Instructions (Preserved exactly as requested)
 with st.expander(T["instruction_head"], expanded=True):
     st.markdown(T["instructions"])
 
-# --- SUPER SMART COLUMN FINDER ---
+# --- CORE LOGIC UTILITIES ---
 def simplify(text):
-    """Removes all non-alphanumeric characters and converts to lowercase."""
     return re.sub(r'[^a-z0-9]', '', str(text).lower())
 
 def find_best_column(df, targets):
-    """Fuzzy matches column names to handle Excel/Logger variations."""
     for col in df.columns:
-        s_col = simplify(col)
-        for t in targets:
-            if s_col == simplify(t):
-                return col
+        if simplify(col) in [simplify(t) for t in targets]:
+            return col
     return None
 
-# --- SIDEBAR UPLOADS ---
+def robust_read(file):
+    """Attempts to read files regardless of Excel's secret formatting."""
+    content = file.read()
+    # Handle encoding and guess separator
+    try:
+        decoded = content.decode('utf-8-sig')
+    except:
+        decoded = content.decode('latin1')
+    
+    # Check if it's semicolon or comma
+    sep = ';' if decoded.count(';') > decoded.count(',') else ','
+    return pd.read_csv(io.StringIO(decoded), sep=sep, engine='python')
+
+# --- SIDEBAR & PROCESSING ---
 st.sidebar.header(T["sidebar_head"])
 loot_files = st.sidebar.file_uploader(T["loot_label"], type=['txt', 'csv'], accept_multiple_files=True)
 chest_files = st.sidebar.file_uploader(T["chest_label"], type=['txt', 'csv'], accept_multiple_files=True)
 
 if loot_files and chest_files:
     try:
-        # 1. Process Multiple Loot Logs
+        # 1. LOOT
         all_loot = []
         for f in loot_files:
-            df = pd.read_csv(f, sep=None, engine='python', encoding='utf-8-sig')
-            
-            # Map columns using fuzzy matching
+            df = robust_read(f)
             c_item = find_best_column(df, ['itemname', 'item'])
             c_qty = find_best_column(df, ['quantity', 'qty', 'amount'])
             c_name = find_best_column(df, ['lootedbyname', 'looter', 'player'])
             c_guild = find_best_column(df, ['lootedbyguild', 'guild'])
             c_time = find_best_column(df, ['timestamputc', 'date', 'time'])
             c_id = find_best_column(df, ['itemid', 'id'])
-
-            if not c_item:
-                st.error(f"❌ Loot Log Error: {f.name} - Could not find 'Item Name'. Found: {list(df.columns)}")
-                st.stop()
-
+            
             df = df.rename(columns={c_item: 'item_name', c_qty: 'quantity', c_name: 'looted_by__name', 
                                     c_guild: 'looted_by__guild', c_time: 'timestamp_utc', c_id: 'item_id'})
             all_loot.append(df)
-            
-        loot_df = pd.concat(all_loot, ignore_index=True)
+        
+        loot_df = pd.concat(all_loot, ignore_index=True).drop_duplicates(subset=['timestamp_utc', 'looted_by__name', 'item_id'])
+        loot_df = loot_df[loot_df['looted_by__guild'] == "I The Flying Dutchman I"]
 
-        # Deduplicate using Timestamp, Looter, and Item ID
-        initial_count = len(loot_df)
-        loot_df = loot_df.drop_duplicates(subset=['timestamp_utc', 'looted_by__name', 'item_id'])
-        removed = initial_count - len(loot_df)
-        if removed > 0:
-            st.toast(T["dup_msg"].format(removed))
-
-        # Filter for Guild
-        TARGET_GUILD = "I The Flying Dutchman I"
-        if 'looted_by__guild' in loot_df.columns:
-            loot_df = loot_df[loot_df['looted_by__guild'] == TARGET_GUILD]
-
-        if loot_df.empty:
-            st.warning(T["no_loot"])
-            st.stop()
-
-        # 2. Process Multiple Chest Logs
+        # 2. CHEST (The problematic part)
         all_chest = []
         for f in chest_files:
-            df = pd.read_csv(f, sep=None, engine='python', encoding='utf-8-sig')
+            df = robust_read(f)
             c_item_ch = find_best_column(df, ['item', 'itemname'])
             c_qty_ch = find_best_column(df, ['amount', 'quantity', 'qty'])
             
-            if not c_item_ch:
-                st.error(f"❌ Chest Log Error: {f.name} - Could not find 'Item'. Found: {list(df.columns)}")
+            if not c_item_ch or not c_qty_ch:
+                st.error(f"❌ Error in {f.name}: Missing 'Item' or 'Amount'. Found: {list(df.columns)}")
                 st.stop()
                 
             df = df.rename(columns={c_item_ch: 'Item', c_qty_ch: 'Amount'})
             all_chest.append(df)
-            
+        
         chest_df = pd.concat(all_chest, ignore_index=True)
 
-        # 3. Aggregate & Compare
-        looted_sum = loot_df.groupby('item_name').agg({
-            'quantity': 'sum',
-            'looted_by__name': lambda x: ', '.join(sorted(set(x.astype(str)))),
-            'looted_by__guild': 'first'
-        }).reset_index()
-
-        chest_sum = chest_df.groupby('Item').agg({'Amount': 'sum'}).reset_index()
-
-        comparison = pd.merge(looted_sum, chest_sum, left_on='item_name', right_on='Item', how='left').fillna(0)
-        comparison['Missing_Qty'] = comparison['quantity'] - comparison['Amount']
-        missing = comparison[comparison['Missing_Qty'] > 0].copy()
-
-        # 4. UI Display & Player Search
-        search = st.text_input(T["search_label"], "")
+        # 3. MERGE
+        l_sum = loot_df.groupby('item_name').agg({'quantity':'sum', 'looted_by__name': lambda x: ', '.join(sorted(set(x.astype(str))))}).reset_index()
+        c_sum = chest_df.groupby('Item').agg({'Amount':'sum'}).reset_index()
         
-        display_df = missing[[
-            'looted_by__guild', 'item_name', 'quantity', 'Amount', 'Missing_Qty', 'looted_by__name'
-        ]].rename(columns={
-            'looted_by__guild': T["guild_col"],
-            'item_name': T["item_col"],
-            'quantity': T["looted_col"],
-            'Amount': T["chest_col"],
-            'Missing_Qty': T["miss_col"],
-            'looted_by__name': T["by_col"]
-        })
+        res = pd.merge(l_sum, c_sum, left_on='item_name', right_on='Item', how='left').fillna(0)
+        res['Missing_Qty'] = res['quantity'] - res['Amount']
+        res = res[res['Missing_Qty'] > 0]
 
+        # 4. DISPLAY
+        search = st.text_input(T["search_label"], "")
+        display = res.rename(columns={'item_name': T["item_col"], 'quantity': T["looted_col"], 'Amount': T["chest_col"], 'Missing_Qty': T["miss_col"], 'looted_by__name': T["by_col"]})
+        
         if search:
-            display_df = display_df[display_df[T["by_col"]].str.contains(search, case=False)]
-
-        st.dataframe(display_df, use_container_width=True)
-
-        # Export CSV Button
-        csv_data = display_df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button(T["btn_text"], csv_data, "audit_report.csv", "text/csv")
+            display = display[display[T["by_col"]].str.contains(search, case=False)]
+            
+        st.dataframe(display.drop(columns=['Item'], errors='ignore'), use_container_width=True)
 
     except Exception as e:
         st.error(f"Error: {e}")
