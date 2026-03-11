@@ -69,7 +69,7 @@ st.title(T["title"])
 with st.expander(T["instruction_head"], expanded=True):
     st.markdown(T["instructions"])
 
-# --- CORE LOGIC UTILITIES ---
+# --- HELPERS ---
 def simplify(text):
     return re.sub(r'[^a-z0-9]', '', str(text).lower())
 
@@ -80,33 +80,31 @@ def find_best_column(df, targets):
     return None
 
 def robust_read(file):
-    """Attempts to read files regardless of Excel's secret formatting."""
     content = file.read()
-    # Handle encoding and guess separator
     try:
         decoded = content.decode('utf-8-sig')
     except:
         decoded = content.decode('latin1')
     
-    # Check if it's semicolon or comma
+    # Check for semicolon or comma
     sep = ';' if decoded.count(';') > decoded.count(',') else ','
     return pd.read_csv(io.StringIO(decoded), sep=sep, engine='python')
 
-# --- SIDEBAR & PROCESSING ---
+# --- PROCESSING ---
 st.sidebar.header(T["sidebar_head"])
 loot_files = st.sidebar.file_uploader(T["loot_label"], type=['txt', 'csv'], accept_multiple_files=True)
 chest_files = st.sidebar.file_uploader(T["chest_label"], type=['txt', 'csv'], accept_multiple_files=True)
 
 if loot_files and chest_files:
     try:
-        # 1. LOOT
         all_loot = []
         for f in loot_files:
             df = robust_read(f)
+            # Find loot columns
             c_item = find_best_column(df, ['itemname', 'item'])
-            c_qty = find_best_column(df, ['quantity', 'qty', 'amount'])
-            c_name = find_best_column(df, ['lootedbyname', 'looter', 'player'])
-            c_guild = find_best_column(df, ['lootedbyguild', 'guild'])
+            c_qty = find_best_column(df, ['quantity', 'qty', 'amount', 'totallooted'])
+            c_name = find_best_column(df, ['lootedbyname', 'looter', 'lootedby'])
+            c_guild = find_best_column(df, ['lootedbyguild', 'guild', 'looterguild'])
             c_time = find_best_column(df, ['timestamputc', 'date', 'time'])
             c_id = find_best_column(df, ['itemid', 'id'])
             
@@ -117,15 +115,15 @@ if loot_files and chest_files:
         loot_df = pd.concat(all_loot, ignore_index=True).drop_duplicates(subset=['timestamp_utc', 'looted_by__name', 'item_id'])
         loot_df = loot_df[loot_df['looted_by__guild'] == "I The Flying Dutchman I"]
 
-        # 2. CHEST (The problematic part)
         all_chest = []
         for f in chest_files:
             df = robust_read(f)
+            # Find chest columns - Added 'Total in Chest' and 'Item Name' for Excel compatibility
             c_item_ch = find_best_column(df, ['item', 'itemname'])
-            c_qty_ch = find_best_column(df, ['amount', 'quantity', 'qty'])
+            c_qty_ch = find_best_column(df, ['amount', 'quantity', 'qty', 'totalinchest'])
             
             if not c_item_ch or not c_qty_ch:
-                st.error(f"❌ Error in {f.name}: Missing 'Item' or 'Amount'. Found: {list(df.columns)}")
+                st.error(f"❌ Error in {f.name}: Missing Item/Amount. Found: {list(df.columns)}")
                 st.stop()
                 
             df = df.rename(columns={c_item_ch: 'Item', c_qty_ch: 'Amount'})
@@ -133,7 +131,7 @@ if loot_files and chest_files:
         
         chest_df = pd.concat(all_chest, ignore_index=True)
 
-        # 3. MERGE
+        # AGGREGATE
         l_sum = loot_df.groupby('item_name').agg({'quantity':'sum', 'looted_by__name': lambda x: ', '.join(sorted(set(x.astype(str))))}).reset_index()
         c_sum = chest_df.groupby('Item').agg({'Amount':'sum'}).reset_index()
         
@@ -141,7 +139,7 @@ if loot_files and chest_files:
         res['Missing_Qty'] = res['quantity'] - res['Amount']
         res = res[res['Missing_Qty'] > 0]
 
-        # 4. DISPLAY
+        # DISPLAY
         search = st.text_input(T["search_label"], "")
         display = res.rename(columns={'item_name': T["item_col"], 'quantity': T["looted_col"], 'Amount': T["chest_col"], 'Missing_Qty': T["miss_col"], 'looted_by__name': T["by_col"]})
         
