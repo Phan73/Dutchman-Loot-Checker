@@ -3,6 +3,30 @@ import pandas as pd
 
 # --- LANGUAGE DICTIONARY ---
 LANGS = {
+    "한국어": {
+        "title": "🛡️ 길드 전리품 감사 도구",
+        "sidebar_head": "1. 로그 업로드",
+        "loot_label": "전리품 로그 업로드 (여러 파일 가능)",
+        "chest_label": "길드 창고 로그 업로드 (여러 파일 가능)",
+        "search_label": "🔍 플레이어 이름으로 검색",
+        "btn_text": "결과 다운로드",
+        "guild_col": "길드",
+        "item_col": "아이템 이름",
+        "looted_col": "총 획득량",
+        "chest_col": "입고 확인됨",
+        "miss_col": "누락됨",
+        "by_col": "획득자",
+        "dup_msg": "중복된 항목 {}개를 제거했습니다!",
+        "no_loot": "해당 길드원의 데이터를 찾을 수 없습니다.",
+        "instruction_head": "📖 상세 사용 방법 (중요: Excel 사용자 필독)",
+        "instructions": """
+        ### 📋 감사 도구 사용 가이드
+        1. **전리품 로그:** 로거에서 추출한 `.txt` 파일을 그대로 업로드하세요.
+        2. **창고 로그:** 게임 내 로그를 복사하여 Excel에 붙여넣고 `.csv`로 저장한 경우에도 이 앱이 자동으로 인식합니다.
+        3. **컬럼 확인:** 창고 파일에는 반드시 **'Item'**과 **'Amount'** 컬럼이 포함되어 있어야 합니다. (대소문자 구분 안 함)
+        4. **중복 제거:** 여러 명의 로그를 동시에 올려도 시간과 아이템 ID를 대조하여 중복을 자동 제거합니다.
+        """
+    },
     "English": {
         "title": "🛡️ Guild Loot Auditor",
         "sidebar_head": "1. Upload Logs",
@@ -18,57 +42,31 @@ LANGS = {
         "by_col": "Looted By",
         "dup_msg": "Removed {} duplicate entries!",
         "no_loot": "No loot found for this guild.",
-        "instruction_head": "📖 Detailed Instructions",
+        "instruction_head": "📖 Detailed Instructions (For Excel Users)",
         "instructions": """
         ### 📋 How to use the Audit Tool
-        1. **Export Loot Logs:** Use your Albion Loot Logger to export the loot data as a `.txt` file.
-        2. **Export Chest Logs:** Go to your Guild Chest (HO or Island), click on the 'Logs' tab, and export as `.csv` or `.txt`.
-        3. **Upload Files:** Drag and drop **all** your loot logs and chest logs into the sidebar.
-        4. **Automatic Cleanup:** The app will automatically remove duplicate lines if multiple people recorded the same loot event.
-        5. **Check Results:** The table will only show items looted by **I The Flying Dutchman I** that have not been fully deposited.
-        """
-    },
-    "한국어": {
-        "title": "🛡️ 길드 전리품 감사 도구",
-        "sidebar_head": "1. 로그 업로드",
-        "loot_label": "전리품 로그 업로드 (여러 파일 선택 가능)",
-        "chest_label": "길드 창고 로그 업로드 (여러 파일 선택 가능)",
-        "search_label": "🔍 플레이어 이름으로 검색",
-        "btn_text": "결과 다운로드",
-        "guild_col": "길드",
-        "item_col": "아이템 이름",
-        "looted_col": "총 획득량",
-        "chest_col": "입고 확인됨",
-        "miss_col": "누락됨",
-        "by_col": "획득자",
-        "dup_msg": "중복된 항목 {}개를 제거했습니다!",
-        "no_loot": "해당 길드원의 데이터를 찾을 수 없습니다.",
-        "instruction_head": "📖 상세 사용 방법",
-        "instructions": """
-        ### 📋 감사 도구 사용 가이드
-        1. **전리품 로그 내보내기:** 전리품 로거(Loot Logger)를 사용하여 데이터를 `.txt` 파일로 저장합니다.
-        2. **창고 로그 내보내기:** 길드 창고(은신처 또는 개인섬)에서 '로그' 탭을 클릭하여 내역을 `.csv` 또는 `.txt`로 저장합니다.
-        3. **파일 업로드:** 사이드바의 업로드 칸에 모든 전리품 로그와 창고 로그 파일을 드래그하여 넣습니다. (여러 개 동시 선택 가능)
-        4. **중복 자동 제거:** 여러 명이 동시에 같은 드랍을 기록했더라도, 앱이 자동으로 중복을 제거하여 정확한 수치를 계산합니다.
-        5. **결과 확인:** 표에는 **I The Flying Dutchman I** 길드원이 획득했지만 아직 창고에 입고되지 않은 아이템만 표시됩니다.
+        1. **Loot Logs:** Upload the raw `.txt` files from your logger.
+        2. **Chest Logs:** If you used Excel to save your logs as `.csv`, this app will now handle the format automatically.
+        3. **Required Columns:** Ensure your chest file has **'Item'** and **'Amount'** headers.
+        4. **Deduplication:** Uploading multiple logs is safe; the app removes duplicate entries based on timestamps.
         """
     }
 }
 
-# --- UI SETUP ---
 st.set_page_config(page_title="Flying Dutchman Auditor", layout="wide")
-
-# Language Selector
 sel_lang = st.sidebar.selectbox("🌐 Language / 언어 선택", ["한국어", "English"])
 T = LANGS[sel_lang]
 
 st.title(T["title"])
-
-# Detailed Instructions in an Expander
 with st.expander(T["instruction_head"], expanded=True):
     st.markdown(T["instructions"])
 
 TARGET_GUILD = "I The Flying Dutchman I"
+
+# --- HELPER FUNCTION TO CLEAN DATAFRAMES ---
+def clean_df_columns(df):
+    df.columns = df.columns.str.strip().str.title() # Convert "item" or "ITEM" to "Item"
+    return df
 
 # --- SIDEBAR UPLOADS ---
 st.sidebar.header(T["sidebar_head"])
@@ -77,22 +75,21 @@ chest_files = st.sidebar.file_uploader(T["chest_label"], type=['txt', 'csv'], ac
 
 if loot_files and chest_files:
     try:
-        # 1. Process Multiple Loot Logs
+        # 1. Process Loot Logs
         all_loot = []
         for f in loot_files:
             df = pd.read_csv(f, sep=None, engine='python', encoding='utf-8-sig')
-            df.columns = df.columns.str.strip()
+            df.columns = df.columns.str.strip() # Loot headers are specific, keep original case
             all_loot.append(df)
         loot_df = pd.concat(all_loot, ignore_index=True)
 
-        # Deduplication using Timestamp, Looter, and Item ID
+        # Deduplicate
         initial_count = len(loot_df)
         loot_df = loot_df.drop_duplicates(subset=['timestamp_utc', 'looted_by__name', 'item_id'])
         removed = initial_count - len(loot_df)
         if removed > 0:
             st.toast(T["dup_msg"].format(removed))
 
-        # Filter for Guild
         if 'looted_by__guild' in loot_df.columns:
             loot_df = loot_df[loot_df['looted_by__guild'] == TARGET_GUILD]
 
@@ -100,13 +97,18 @@ if loot_files and chest_files:
             st.warning(T["no_loot"])
             st.stop()
 
-        # 2. Process Multiple Chest Logs
+        # 2. Process Chest Logs (Fix for Excel CSVs)
         all_chest = []
         for f in chest_files:
             df = pd.read_csv(f, sep=None, engine='python', encoding='utf-8-sig')
-            df.columns = df.columns.str.strip()
+            df = clean_df_columns(df) # Fixes column names from Excel
             all_chest.append(df)
         chest_df = pd.concat(all_chest, ignore_index=True)
+
+        # Ensure required columns exist after cleaning
+        if 'Item' not in chest_df.columns or 'Amount' not in chest_df.columns:
+            st.error(f"Missing columns in Chest Log. Found: {list(chest_df.columns)}. Need: Item, Amount")
+            st.stop()
 
         # 3. Aggregate Data
         looted_sum = loot_df.groupby('item_name').agg({
@@ -117,16 +119,13 @@ if loot_files and chest_files:
 
         chest_sum = chest_df.groupby('Item').agg({'Amount': 'sum'}).reset_index()
 
-        # 4. Compare Loot vs Chest
+        # 4. Compare
         comparison = pd.merge(looted_sum, chest_sum, left_on='item_name', right_on='Item', how='left').fillna(0)
         comparison['Missing_Qty'] = comparison['quantity'] - comparison['Amount']
-        
-        # Only show items where at least 1 is missing
         missing = comparison[comparison['Missing_Qty'] > 0].copy()
 
-        # 5. UI Display & Player Search
+        # 5. UI
         search = st.text_input(T["search_label"], "")
-        
         display_df = missing[[
             'looted_by__guild', 'item_name', 'quantity', 'Amount', 'Missing_Qty', 'looted_by__name'
         ]].rename(columns={
@@ -143,9 +142,8 @@ if loot_files and chest_files:
 
         st.dataframe(display_df, use_container_width=True)
 
-        # Export CSV Button
-        csv = display_df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button(T["btn_text"], csv, "audit_report.csv", "text/csv")
+        csv_data = display_df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button(T["btn_text"], csv_data, "audit_report.csv", "text/csv")
 
     except Exception as e:
         st.error(f"Error: {e}")
