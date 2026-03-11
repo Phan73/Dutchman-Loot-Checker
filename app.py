@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import re
 
 # --- LANGUAGE DICTIONARY ---
 LANGS = {
@@ -18,12 +19,16 @@ LANGS = {
         "by_col": "획득자",
         "dup_msg": "중복된 항목 {}개를 제거했습니다!",
         "no_loot": "해당 길드원의 데이터를 찾을 수 없습니다.",
-        "instruction_head": "📖 상세 사용 방법",
+        "instruction_head": "📖 상세 사용 방법 (중요: Excel 사용자 필독)",
         "instructions": """
-        ### 📋 사용 가이드
-        1. **파일 형식:** .txt 또는 Excel에서 저장한 .csv 파일 모두 지원합니다.
-        2. **자동 인식:** 대소문자가 다르거나 공백이 있어도 앱이 자동으로 컬럼을 찾아냅니다.
-        3. **중복 제거:** 동일한 시간과 아이템 ID를 가진 중복 데이터는 하나로 계산됩니다.
+        ### 📋 감사 도구 사용 가이드
+        1. **전리품 로그 내보내기:** 전리품 로거(Loot Logger)를 사용하여 데이터를 `.txt` 파일로 저장합니다.
+        2. **창고 로그 내보내기:** 길드 창고(은신처 또는 개인섬)에서 '로그' 탭을 클릭하여 내역을 `.csv` 또는 `.txt`로 저장합니다.
+        3. **파일 업로드:** 사이드바의 업로드 칸에 모든 전리품 로그와 창고 로그 파일을 드래그하여 넣습니다. (여러 개 동시 선택 가능)
+        4. **중복 자동 제거:** 여러 명이 동시에 같은 드랍을 기록했더라도, 앱이 자동으로 중복을 제거하여 정확한 수치를 계산합니다.
+        5. **결과 확인:** 표에는 **I The Flying Dutchman I** 길드원이 획득했지만 아직 창고에 입고되지 않은 아이템만 표시됩니다.
+        
+        **💡 Excel 사용자 참고:** Excel에서 파일을 열어 수정 후 `.csv`로 저장한 경우에도 앱이 자동으로 컬럼명을 인식하여 오류를 방지합니다.
         """
     },
     "English": {
@@ -41,28 +46,43 @@ LANGS = {
         "by_col": "Looted By",
         "dup_msg": "Removed {} duplicate entries!",
         "no_loot": "No loot found for this guild.",
-        "instruction_head": "📖 Instructions",
-        "instructions": "Upload your logs. The app handles different column names automatically."
+        "instruction_head": "📖 Detailed Instructions (For Excel Users)",
+        "instructions": """
+        ### 📋 How to use the Audit Tool
+        1. **Export Loot Logs:** Use your Albion Loot Logger to export the loot data as a `.txt` file.
+        2. **Export Chest Logs:** Go to your Guild Chest (HO or Island), click on the 'Logs' tab, and export as `.csv` or `.txt`.
+        3. **Upload Files:** Drag and drop **all** your loot logs and chest logs into the sidebar.
+        4. **Automatic Cleanup:** The app will automatically remove duplicate lines if multiple people recorded the same loot event.
+        5. **Check Results:** The table will only show items looted by **I The Flying Dutchman I** that have not been fully deposited.
+        
+        **💡 Note for Excel Users:** If you edit files in Excel and save as `.csv`, this app will automatically detect the columns even if the headers change slightly.
+        """
     }
 }
 
 st.set_page_config(page_title="Flying Dutchman Auditor", layout="wide")
+
+# Language Selector
 sel_lang = st.sidebar.selectbox("🌐 Language / 언어 선택", ["한국어", "English"])
 T = LANGS[sel_lang]
 
 st.title(T["title"])
-with st.expander(T["instruction_head"]):
+
+# Detailed Instructions (Preserved exactly as requested)
+with st.expander(T["instruction_head"], expanded=True):
     st.markdown(T["instructions"])
 
-TARGET_GUILD = "I The Flying Dutchman I"
+# --- SUPER SMART COLUMN FINDER ---
+def simplify(text):
+    """Removes all non-alphanumeric characters and converts to lowercase."""
+    return re.sub(r'[^a-z0-9]', '', str(text).lower())
 
-# --- SMART COLUMN FINDER ---
-def find_column(df, possible_names):
-    """Finds a column even if case or spacing is different."""
+def find_best_column(df, targets):
+    """Fuzzy matches column names to handle Excel/Logger variations."""
     for col in df.columns:
-        clean_col = col.strip().lower().replace("_", "").replace(" ", "")
-        for target in possible_names:
-            if clean_col == target.lower().replace("_", "").replace(" ", ""):
+        s_col = simplify(col)
+        for t in targets:
+            if s_col == simplify(t):
                 return col
     return None
 
@@ -73,48 +93,59 @@ chest_files = st.sidebar.file_uploader(T["chest_label"], type=['txt', 'csv'], ac
 
 if loot_files and chest_files:
     try:
-        # 1. Process Loot Logs
+        # 1. Process Multiple Loot Logs
         all_loot = []
         for f in loot_files:
             df = pd.read_csv(f, sep=None, engine='python', encoding='utf-8-sig')
             
-            # Use Smart Finder for Loot Columns
-            c_item = find_column(df, ['item_name', 'itemname', 'Item'])
-            c_qty = find_column(df, ['quantity', 'qty', 'amount'])
-            c_name = find_column(df, ['looted_by__name', 'looter', 'player'])
-            c_guild = find_column(df, ['looted_by__guild', 'guild'])
-            c_time = find_column(df, ['timestamp_utc', 'date', 'time'])
-            c_id = find_column(df, ['item_id', 'id'])
+            # Map columns using fuzzy matching
+            c_item = find_best_column(df, ['itemname', 'item'])
+            c_qty = find_best_column(df, ['quantity', 'qty', 'amount'])
+            c_name = find_best_column(df, ['lootedbyname', 'looter', 'player'])
+            c_guild = find_best_column(df, ['lootedbyguild', 'guild'])
+            c_time = find_best_column(df, ['timestamputc', 'date', 'time'])
+            c_id = find_best_column(df, ['itemid', 'id'])
 
-            # Rename found columns to standard names for logic
-            rename_map = {c_item: 'item_name', c_qty: 'quantity', c_name: 'looted_by__name', 
-                          c_guild: 'looted_by__guild', c_time: 'timestamp_utc', c_id: 'item_id'}
-            df = df.rename(columns={k: v for k, v in rename_map.items() if k is not None})
+            if not c_item:
+                st.error(f"❌ Loot Log Error: {f.name} - Could not find 'Item Name'. Found: {list(df.columns)}")
+                st.stop()
+
+            df = df.rename(columns={c_item: 'item_name', c_qty: 'quantity', c_name: 'looted_by__name', 
+                                    c_guild: 'looted_by__guild', c_time: 'timestamp_utc', c_id: 'item_id'})
             all_loot.append(df)
             
         loot_df = pd.concat(all_loot, ignore_index=True)
 
-        # Deduplicate
+        # Deduplicate using Timestamp, Looter, and Item ID
         initial_count = len(loot_df)
         loot_df = loot_df.drop_duplicates(subset=['timestamp_utc', 'looted_by__name', 'item_id'])
         removed = initial_count - len(loot_df)
         if removed > 0:
             st.toast(T["dup_msg"].format(removed))
 
-        # Filter Guild
+        # Filter for Guild
+        TARGET_GUILD = "I The Flying Dutchman I"
         if 'looted_by__guild' in loot_df.columns:
             loot_df = loot_df[loot_df['looted_by__guild'] == TARGET_GUILD]
 
-        # 2. Process Chest Logs
+        if loot_df.empty:
+            st.warning(T["no_loot"])
+            st.stop()
+
+        # 2. Process Multiple Chest Logs
         all_chest = []
         for f in chest_files:
             df = pd.read_csv(f, sep=None, engine='python', encoding='utf-8-sig')
-            # Use Smart Finder for Chest Columns
-            c_item_ch = find_column(df, ['item', 'item_name', 'itemname'])
-            c_qty_ch = find_column(df, ['amount', 'quantity', 'qty'])
+            c_item_ch = find_best_column(df, ['item', 'itemname'])
+            c_qty_ch = find_best_column(df, ['amount', 'quantity', 'qty'])
             
+            if not c_item_ch:
+                st.error(f"❌ Chest Log Error: {f.name} - Could not find 'Item'. Found: {list(df.columns)}")
+                st.stop()
+                
             df = df.rename(columns={c_item_ch: 'Item', c_qty_ch: 'Amount'})
             all_chest.append(df)
+            
         chest_df = pd.concat(all_chest, ignore_index=True)
 
         # 3. Aggregate & Compare
@@ -130,20 +161,26 @@ if loot_files and chest_files:
         comparison['Missing_Qty'] = comparison['quantity'] - comparison['Amount']
         missing = comparison[comparison['Missing_Qty'] > 0].copy()
 
-        # 4. Display Result
+        # 4. UI Display & Player Search
         search = st.text_input(T["search_label"], "")
+        
         display_df = missing[[
             'looted_by__guild', 'item_name', 'quantity', 'Amount', 'Missing_Qty', 'looted_by__name'
         ]].rename(columns={
-            'looted_by__guild': T["guild_col"], 'item_name': T["item_col"], 'quantity': T["looted_col"],
-            'Amount': T["chest_col"], 'Missing_Qty': T["miss_col"], 'looted_by__name': T["by_col"]
+            'looted_by__guild': T["guild_col"],
+            'item_name': T["item_col"],
+            'quantity': T["looted_col"],
+            'Amount': T["chest_col"],
+            'Missing_Qty': T["miss_col"],
+            'looted_by__name': T["by_col"]
         })
 
         if search:
             display_df = display_df[display_df[T["by_col"]].str.contains(search, case=False)]
 
         st.dataframe(display_df, use_container_width=True)
-        
+
+        # Export CSV Button
         csv_data = display_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button(T["btn_text"], csv_data, "audit_report.csv", "text/csv")
 
