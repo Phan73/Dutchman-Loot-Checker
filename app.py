@@ -3,7 +3,7 @@ import pandas as pd
 import re
 import io
 
-# --- LANGUAGE DICTIONARY (PRESERVED EXACTLY) ---
+# --- LANGUAGE DICTIONARY (PRESERVED) ---
 LANGS = {
     "한국어": {
         "title": "🛡️ 길드 전리품 감사 도구",
@@ -17,19 +17,15 @@ LANGS = {
         "looted_col": "총 획득량",
         "chest_col": "입고 확인됨",
         "miss_col": "누락됨",
-        "by_col": "획득자 (인원)",
-        "dup_msg": "중복된 항목 {}개를 제거했습니다!",
-        "no_loot": "해당 길드원의 데이터를 찾을 수 없습니다.",
+        "by_col": "획득자 명단",
         "instruction_head": "📖 상세 사용 방법 (중요: Excel 사용자 필독)",
         "instructions": """
         ### 📋 감사 도구 사용 가이드
         1. **전리품 로그 내보내기:** 전리품 로거(Loot Logger)를 사용하여 데이터를 `.txt` 파일로 저장합니다.
         2. **창고 로그 내보내기:** 길드 창고(은신처 또는 개인섬)에서 '로그' 탭을 클릭하여 내역을 `.csv` 또는 `.txt`로 저장합니다.
-        3. **파일 업로드:** 사이드바의 업로드 칸에 모든 전리품 로그와 창고 로그 파일을 드래그하여 넣습니다. (여러 개 동시 선택 가능)
-        4. **중복 자동 제거:** 여러 명이 동시에 같은 드랍을 기록했더라도, 앱이 자동으로 중복을 제거하여 정확한 수치를 계산합니다.
+        3. **파일 업로드:** 사이드바의 업로드 칸에 모든 전리품 로그와 창고 로그 파일을 드래그하여 넣습니다.
+        4. **중복 자동 제거:** 여러 명이 동시에 같은 드랍을 기록했더라도 중복을 제거하여 정확한 수치를 계산합니다.
         5. **결과 확인:** 표에는 **I The Flying Dutchman I** 길드원이 획득했지만 아직 창고에 입고되지 않은 아이템만 표시됩니다.
-        
-        **💡 Excel 사용자 참고:** Excel에서 파일을 열어 수정 후 `.csv`로 저장한 경우에도 앱이 자동으로 컬럼명을 인식하여 오류를 방지합니다.
         """
     },
     "English": {
@@ -44,19 +40,15 @@ LANGS = {
         "looted_col": "Total Looted",
         "chest_col": "In Chests",
         "miss_col": "Missing",
-        "by_col": "Looted By (Count)",
-        "dup_msg": "Removed {} duplicate entries!",
-        "no_loot": "No loot found for this guild.",
+        "by_col": "Looted By (Full List)",
         "instruction_head": "📖 Detailed Instructions (For Excel Users)",
         "instructions": """
         ### 📋 How to use the Audit Tool
         1. **Export Loot Logs:** Use your Albion Loot Logger to export the loot data as a `.txt` file.
-        2. **Export Chest Logs:** Go to your Guild Chest (HO or Island), click on the 'Logs' tab, and export as `.csv` or `.txt`.
-        3. **Upload Files:** Drag and drop **all** your loot logs and chest logs into the sidebar.
-        4. **Automatic Cleanup:** The app will automatically remove duplicate lines if multiple people recorded the same loot event.
-        5. **Check Results:** The table will only show items looted by **I The Flying Dutchman I** that have not been fully deposited.
-        
-        **💡 Note for Excel Users:** If you edit files in Excel and save as `.csv`, this app will automatically detect the columns even if the headers change slightly.
+        2. **Export Chest Logs:** Export your Guild Chest logs as `.csv` or `.txt`.
+        3. **Upload Files:** Drag and drop **all** files into the sidebar.
+        4. **Automatic Cleanup:** The app removes duplicate lines from multiple recorders.
+        5. **Check Results:** Table shows missing items looted by **I The Flying Dutchman I**.
         """
     }
 }
@@ -101,8 +93,8 @@ if loot_files and chest_files:
             c_item = find_best_column(df, ['itemname', 'item'])
             c_qty = find_best_column(df, ['quantity', 'qty', 'amount', 'totallooted'])
             c_name = find_best_column(df, ['lootedbyname', 'looter', 'lootedby'])
-            c_guild = find_best_column(df, ['lootedbyguild', 'guild', 'looterguild'])
-            c_time = find_best_column(df, ['timestamputc', 'date', 'time'])
+            c_guild = find_best_column(df, ['lootedbyguild', 'guild'])
+            c_time = find_best_column(df, ['timestamputc', 'date'])
             c_id = find_best_column(df, ['itemid', 'id'])
             
             df = df.rename(columns={c_item: 'item_name', c_qty: 'quantity', c_name: 'looted_by__name', 
@@ -117,53 +109,43 @@ if loot_files and chest_files:
             df = robust_read(f)
             c_item_ch = find_best_column(df, ['item', 'itemname'])
             c_qty_ch = find_best_column(df, ['amount', 'quantity', 'qty', 'totalinchest'])
-            
-            if not c_item_ch or not c_qty_ch:
-                st.error(f"❌ Error in {f.name}: Missing Item/Amount. Found: {list(df.columns)}")
-                st.stop()
-            df = df.rename(columns={c_item_ch: 'Item', c_qty_ch: 'Amount'})
-            all_chest.append(df)
+            if c_item_ch and c_qty_ch:
+                df = df.rename(columns={c_item_ch: 'Item', c_qty_ch: 'Amount'})
+                all_chest.append(df)
         
         chest_df = pd.concat(all_chest, ignore_index=True)
 
         # AGGREGATE
-        # Logic updated to summarize names and count unique looters
         l_sum = loot_df.groupby('item_name').agg({
             'quantity': 'sum', 
-            'looted_by__name': lambda x: sorted(list(set(x.astype(str))))
+            'looted_by__name': lambda x: ', '.join(sorted(list(set(x.astype(str)))))
         }).reset_index()
         
         c_sum = chest_df.groupby('Item').agg({'Amount':'sum'}).reset_index()
-        
         res = pd.merge(l_sum, c_sum, left_on='item_name', right_on='Item', how='left').fillna(0)
         res['Missing_Qty'] = res['quantity'] - res['Amount']
         res = res[res['Missing_Qty'] > 0]
 
         # PREPARE DISPLAY
-        # Create a "Player List" string for the search and a "Summary" string for the table
-        res['Player_List'] = res['looted_by__name'].apply(lambda x: ', '.join(x))
-        res['Looter_Summary'] = res['looted_by__name'].apply(lambda x: f"{len(x)} Players (Hover to see)" if len(x) > 3 else ', '.join(x))
-
         search = st.text_input(T["search_label"], "")
-        
         display = res.rename(columns={
             'item_name': T["item_col"], 
             'quantity': T["looted_col"], 
             'Amount': T["chest_col"], 
             'Missing_Qty': T["miss_col"], 
-            'Looter_Summary': T["by_col"]
+            'looted_by__name': T["by_col"]
         })
         
-        # Search against the full list of players
         if search:
-            display = display[display['Player_List'].str.contains(search, case=False)]
+            display = display[display[T["by_col"]].str.contains(search, case=False)]
             
-        # Final display with hover help for the looter list
+        # Displaying with text wrapping enabled for the looter list
         st.dataframe(
             display[[T["item_col"], T["looted_col"], T["chest_col"], T["miss_col"], T["by_col"]]], 
             use_container_width=True,
+            hide_index=True,
             column_config={
-                T["by_col"]: st.column_config.TextColumn(help="Full list: " + res['Player_List'].to_string(index=False))
+                T["by_col"]: st.column_config.TextColumn(width="large") 
             }
         )
 
