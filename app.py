@@ -17,7 +17,7 @@ LANGS = {
         "looted_col": "총 획득량",
         "chest_col": "입고 확인됨",
         "miss_col": "누락됨",
-        "by_col": "획득자",
+        "by_col": "획득자 (인원)",
         "dup_msg": "중복된 항목 {}개를 제거했습니다!",
         "no_loot": "해당 길드원의 데이터를 찾을 수 없습니다.",
         "instruction_head": "📖 상세 사용 방법 (중요: Excel 사용자 필독)",
@@ -44,7 +44,7 @@ LANGS = {
         "looted_col": "Total Looted",
         "chest_col": "In Chests",
         "miss_col": "Missing",
-        "by_col": "Looted By",
+        "by_col": "Looted By (Count)",
         "dup_msg": "Removed {} duplicate entries!",
         "no_loot": "No loot found for this guild.",
         "instruction_head": "📖 Detailed Instructions (For Excel Users)",
@@ -85,8 +85,6 @@ def robust_read(file):
         decoded = content.decode('utf-8-sig')
     except:
         decoded = content.decode('latin1')
-    
-    # Check for semicolon or comma
     sep = ';' if decoded.count(';') > decoded.count(',') else ','
     return pd.read_csv(io.StringIO(decoded), sep=sep, engine='python')
 
@@ -100,7 +98,6 @@ if loot_files and chest_files:
         all_loot = []
         for f in loot_files:
             df = robust_read(f)
-            # Find loot columns
             c_item = find_best_column(df, ['itemname', 'item'])
             c_qty = find_best_column(df, ['quantity', 'qty', 'amount', 'totallooted'])
             c_name = find_best_column(df, ['lootedbyname', 'looter', 'lootedby'])
@@ -118,35 +115,57 @@ if loot_files and chest_files:
         all_chest = []
         for f in chest_files:
             df = robust_read(f)
-            # Find chest columns - Added 'Total in Chest' and 'Item Name' for Excel compatibility
             c_item_ch = find_best_column(df, ['item', 'itemname'])
             c_qty_ch = find_best_column(df, ['amount', 'quantity', 'qty', 'totalinchest'])
             
             if not c_item_ch or not c_qty_ch:
                 st.error(f"❌ Error in {f.name}: Missing Item/Amount. Found: {list(df.columns)}")
                 st.stop()
-                
             df = df.rename(columns={c_item_ch: 'Item', c_qty_ch: 'Amount'})
             all_chest.append(df)
         
         chest_df = pd.concat(all_chest, ignore_index=True)
 
         # AGGREGATE
-        l_sum = loot_df.groupby('item_name').agg({'quantity':'sum', 'looted_by__name': lambda x: ', '.join(sorted(set(x.astype(str))))}).reset_index()
+        # Logic updated to summarize names and count unique looters
+        l_sum = loot_df.groupby('item_name').agg({
+            'quantity': 'sum', 
+            'looted_by__name': lambda x: sorted(list(set(x.astype(str))))
+        }).reset_index()
+        
         c_sum = chest_df.groupby('Item').agg({'Amount':'sum'}).reset_index()
         
         res = pd.merge(l_sum, c_sum, left_on='item_name', right_on='Item', how='left').fillna(0)
         res['Missing_Qty'] = res['quantity'] - res['Amount']
         res = res[res['Missing_Qty'] > 0]
 
-        # DISPLAY
+        # PREPARE DISPLAY
+        # Create a "Player List" string for the search and a "Summary" string for the table
+        res['Player_List'] = res['looted_by__name'].apply(lambda x: ', '.join(x))
+        res['Looter_Summary'] = res['looted_by__name'].apply(lambda x: f"{len(x)} Players (Hover to see)" if len(x) > 3 else ', '.join(x))
+
         search = st.text_input(T["search_label"], "")
-        display = res.rename(columns={'item_name': T["item_col"], 'quantity': T["looted_col"], 'Amount': T["chest_col"], 'Missing_Qty': T["miss_col"], 'looted_by__name': T["by_col"]})
         
+        display = res.rename(columns={
+            'item_name': T["item_col"], 
+            'quantity': T["looted_col"], 
+            'Amount': T["chest_col"], 
+            'Missing_Qty': T["miss_col"], 
+            'Looter_Summary': T["by_col"]
+        })
+        
+        # Search against the full list of players
         if search:
-            display = display[display[T["by_col"]].str.contains(search, case=False)]
+            display = display[display['Player_List'].str.contains(search, case=False)]
             
-        st.dataframe(display.drop(columns=['Item'], errors='ignore'), use_container_width=True)
+        # Final display with hover help for the looter list
+        st.dataframe(
+            display[[T["item_col"], T["looted_col"], T["chest_col"], T["miss_col"], T["by_col"]]], 
+            use_container_width=True,
+            column_config={
+                T["by_col"]: st.column_config.TextColumn(help="Full list: " + res['Player_List'].to_string(index=False))
+            }
+        )
 
     except Exception as e:
         st.error(f"Error: {e}")
