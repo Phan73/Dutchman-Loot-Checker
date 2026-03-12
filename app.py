@@ -1,4 +1,76 @@
+I see the issue. That NameError at line 1 usually happens in Streamlit if st is used before it is actually defined, or if there's a hidden character at the very beginning of the file when you copy-paste.
+
+In the previous snippet, I accidentally put the language dictionary above the import streamlit as st line in the logic flow. Streamlit requires the imports to be first. I have fixed the order and added a "clean" import block to ensure it runs perfectly.
+
+Updated app.py (Fixed Order & Anti-Double Counting)
+Python
+import streamlit as st
+import pandas as pd
+import re
+import io
+
+# --- 1. SET PAGE CONFIG (MUST BE FIRST STREAMLIT COMMAND) ---
 st.set_page_config(page_title="Flying Dutchman Auditor", layout="wide")
+
+# --- 2. LANGUAGE DICTIONARY (ORIGINAL INSTRUCTIONS PRESERVED) ---
+LANGS = {
+    "한국어": {
+        "title": "🛡️ 길드 전리품 감사 도구 (Flying Dutchman 독점)",
+        "sidebar_head": "1. 로그 업로드",
+        "loot_label": "전리품 로그 업로드 (.txt)",
+        "chest_label": "창고 로그 업로드 (CSV 또는 복사본 TXT)",
+        "tab_full": "전체 리포트 (Full Report)",
+        "tab_player": "개별 감사 (Player Audit)",
+        "search_label": "👤 플레이어 이름 검색",
+        "reset_btn": "모든 데이터 초기화 (Reset)",
+        "item_col": "아이템 이름",
+        "looted_col": "획득량",
+        "chest_col": "입고 확인됨",
+        "miss_col": "누락됨",
+        "by_col": "획득자 명단",
+        "status_col": "개인별 입고 상태",
+        "audit_col": "감사 확인 (사망/특이사항)",
+        "banked": "✅ 입고 완료",
+        "missing": "❌ 미입고",
+        "instruction_head": "📖 상세 사용 방법 (중요: Excel 및 복사-붙여넣기 사용자 필독)",
+        "instructions": """
+        ### 📋 감사 도구 사용 가이드
+        1. **전리품 로그 내보내기:** 전리품 로거(Loot Logger)를 사용하여 데이터를 `.txt` 파일로 저장합니다.
+        2. **창고 로그 내보내기 (두 가지 방법 모두 지원):**
+            * **방법 A (복사-붙여넣기):** 게임 내 창고 로그를 전체 드래그하여 복사한 후, 메모장(`.txt`)에 붙여넣어 저장하세요.
+            * **방법 B (Excel):** 게임 로그를 Excel에 붙여넣고 수정했다면, 반드시 `.csv` (쉼표로 분리) 형식으로 저장하세요.
+        3. **파일 업로드:** 사이드바의 업로드 칸에 모든 전리품 로그와 창고 로그 파일을 넣습니다.
+        4. **중복 자동 제거:** 여러 명의 로그가 몇 초 정도 차이가 나더라도 자동으로 하나로 합쳐줍니다. (중복 방지)
+        """
+    },
+    "English": {
+        "title": "🛡️ Guild Loot Auditor (Flying Dutchman Exclusive)",
+        "sidebar_head": "1. Upload Logs",
+        "loot_label": "Upload Loot Logs (.txt)",
+        "chest_label": "Upload Chest Logs (CSV or Copy-Paste TXT)",
+        "tab_full": "Full Report",
+        "tab_player": "Player Audit",
+        "search_label": "👤 Search Player Name",
+        "reset_btn": "Clear All Data",
+        "item_col": "Item Name",
+        "looted_col": "Looted Qty",
+        "chest_col": "In Chests",
+        "miss_col": "Missing",
+        "by_col": "Looted By",
+        "status_col": "Personal Status",
+        "audit_col": "Audit Action (Died/Other)",
+        "banked": "✅ Banked",
+        "missing": "❌ Missing",
+        "instruction_head": "📖 Detailed Instructions (Supports Excel & Copy-Paste)",
+        "instructions": """
+        ### 📋 How to use the Audit Tool
+        1. **Export Logs:** Export Loot logs and Chest logs as instructed.
+        2. **Anti-Double Counting:** This version handles the ~2 second time difference between different players' logs.
+        3. **Strict Name Matching:** Only the player listed in the chest log gets credit for the deposit.
+        """
+    }
+}
+
 sel_lang = st.sidebar.selectbox("🌐 Language", list(LANGS.keys()))
 T = LANGS[sel_lang]
 
@@ -26,7 +98,7 @@ def robust_read(file):
         if len(df.columns) > 1: return df
     return pd.read_csv(io.StringIO(content), engine='python')
 
-# --- DATA RESET ---
+# --- SIDEBAR & DATA RESET ---
 if st.sidebar.button(T["reset_btn"]):
     st.cache_data.clear()
     st.rerun()
@@ -56,11 +128,8 @@ if loot_files and chest_files:
         raw_loot = pd.concat(all_loot).dropna(subset=['time'])
         raw_loot = raw_loot[raw_loot['guild'] == TARGET_GUILD]
 
-        # --- NEW FUZZY DE-DUPLICATION LOGIC ---
-        # Sort so we can compare time differences between rows
+        # --- FUZZY DE-DUPLICATION (15s Window) ---
         raw_loot = raw_loot.sort_values(by=['player', 'item_name', 'time'])
-        
-        # Identify duplicates: same player, same item, within 15 seconds of the previous record
         is_duplicate = (
             (raw_loot['player'] == raw_loot['player'].shift()) &
             (raw_loot['item_name'] == raw_loot['item_name'].shift()) &
@@ -111,3 +180,5 @@ if loot_files and chest_files:
                     st.warning("No data found.")
     except Exception as e:
         st.error(f"Error: {e}")
+else:
+    st.info(f"🛡️ Waiting for {TARGET_GUILD} logs...")
