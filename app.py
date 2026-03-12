@@ -3,10 +3,10 @@ import pandas as pd
 import re
 import io
 
-# --- 1. SET PAGE CONFIG (MUST BE FIRST STREAMLIT COMMAND) ---
+# --- 1. SET PAGE CONFIG (MUST BE FIRST) ---
 st.set_page_config(page_title="Flying Dutchman Auditor", layout="wide")
 
-# --- 2. LANGUAGE DICTIONARY (ORIGINAL INSTRUCTIONS PRESERVED) ---
+# --- 2. LANGUAGE DICTIONARY (RESTORED ORIGINAL INSTRUCTIONS) ---
 LANGS = {
     "한국어": {
         "title": "🛡️ 길드 전리품 감사 도구 (Flying Dutchman 독점)",
@@ -33,8 +33,12 @@ LANGS = {
         2. **창고 로그 내보내기 (두 가지 방법 모두 지원):**
             * **방법 A (복사-붙여넣기):** 게임 내 창고 로그를 전체 드래그하여 복사한 후, 메모장(`.txt`)에 붙여넣어 저장하세요.
             * **방법 B (Excel):** 게임 로그를 Excel에 붙여넣고 수정했다면, 반드시 `.csv` (쉼표로 분리) 형식으로 저장하세요.
-        3. **파일 업로드:** 사이드바의 업로드 칸에 모든 전리품 로그와 창고 로그 파일을 넣습니다.
-        4. **중복 자동 제거:** 여러 명의 로그가 몇 초 정도 차이가 나더라도 자동으로 하나로 합쳐줍니다. (중복 방지)
+        3. **파일 업로드:** 사이드바의 업로드 칸에 모든 전리품 로그와 창고 로그 파일을 넣습니다. (여러 개 동시 선택 가능)
+        4. **중복 자동 제거:** 여러 명이 동시에 기록했더라도 앱이 자동으로 중복을 제거하여 정확한 수치를 계산합니다.
+        5. **결과 확인:** 표에는 **I The Flying Dutchman I** 길드원이 획득했지만 아직 창고에 입고되지 않은 아이템만 표시됩니다.
+        6. **개별 감사 기능:** '개별 감사' 탭에서 플레이어를 검색한 후, 해당 인원이 '사망'했는지 등의 여부를 수동으로 체크할 수 있습니다.
+        
+        **💡 팁:** 게임에서 직접 복사한 텍스트 파일도 앱이 자동으로 '아이템'과 '수량' 컬럼을 찾아냅니다!
         """
     },
     "English": {
@@ -50,17 +54,22 @@ LANGS = {
         "looted_col": "Looted Qty",
         "chest_col": "In Chests",
         "miss_col": "Missing",
-        "by_col": "Looted By",
-        "status_col": "Personal Status",
+        "by_col": "Looted By (Full List)",
+        "status_col": "System Status",
         "audit_col": "Audit Action (Died/Other)",
         "banked": "✅ Banked",
         "missing": "❌ Missing",
         "instruction_head": "📖 Detailed Instructions (Supports Excel & Copy-Paste)",
         "instructions": """
         ### 📋 How to use the Audit Tool
-        1. **Export Logs:** Export Loot logs and Chest logs as instructed.
-        2. **Anti-Double Counting:** This version handles the ~2 second time difference between different players' logs.
-        3. **Strict Name Matching:** Only the player listed in the chest log gets credit for the deposit.
+        1. **Export Loot Logs:** Use your Albion Loot Logger to export the loot data as a `.txt` file.
+        2. **Export Chest Logs (Two supported methods):**
+            * **Method A (Copy-Paste):** Highlight the logs inside the game, copy them, and paste them into a standard Notepad (`.txt`) file.
+            * **Method B (Excel):** If you use Excel to organize logs, save the file as a `.csv` format before uploading.
+        3. **Upload Files:** Drag and drop **all** your loot logs and chest logs into the sidebar.
+        4. **Automatic Cleanup:** The app will automatically remove duplicate lines from multiple recorders.
+        5. **Check Results:** The table only shows items looted by **I The Flying Dutchman I** that are still missing from the chest.
+        6. **Audit Checkmarks:** In the 'Player Audit' tab, you can manually flag if a player died with the loot or provide other notes.
         """
     }
 }
@@ -176,3 +185,4 @@ if loot_files and chest_files:
         st.error(f"Error: {e}")
 else:
     st.info(f"🛡️ Waiting for {TARGET_GUILD} logs...")
+
