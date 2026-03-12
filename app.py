@@ -1,76 +1,3 @@
-import streamlit as st
-import pandas as pd
-import re
-import io
-
-# --- LANGUAGE DICTIONARY (RESTORED ORIGINAL INSTRUCTIONS) ---
-LANGS = {
-    "한국어": {
-        "title": "🛡️ 길드 전리품 감사 도구 (Flying Dutchman 독점)",
-        "sidebar_head": "1. 로그 업로드",
-        "loot_label": "전리품 로그 업로드 (.txt)",
-        "chest_label": "창고 로그 업로드 (CSV 또는 복사본 TXT)",
-        "tab_full": "전체 리포트 (Full Report)",
-        "tab_player": "개별 감사 (Player Audit)",
-        "search_label": "👤 플레이어 이름 검색",
-        "reset_btn": "모든 데이터 초기화 (Reset)",
-        "item_col": "아이템 이름",
-        "looted_col": "획득량",
-        "chest_col": "입고 확인됨",
-        "miss_col": "누락됨",
-        "by_col": "획득자 명단",
-        "status_col": "개인별 입고 상태",
-        "audit_col": "감사 확인 (사망/특이사항)",
-        "banked": "✅ 입고 완료",
-        "missing": "❌ 미입고",
-        "instruction_head": "📖 상세 사용 방법 (중요: Excel 및 복사-붙여넣기 사용자 필독)",
-        "instructions": """
-        ### 📋 감사 도구 사용 가이드
-        1. **전리품 로그 내보내기:** 전리품 로거(Loot Logger)를 사용하여 데이터를 `.txt` 파일로 저장합니다.
-        2. **창고 로그 내보내기 (두 가지 방법 모두 지원):**
-            * **방법 A (복사-붙여넣기):** 게임 내 창고 로그를 전체 드래그하여 복사한 후, 메모장(`.txt`)에 붙여넣어 저장하세요.
-            * **방법 B (Excel):** 게임 로그를 Excel에 붙여넣고 수정했다면, 반드시 `.csv` (쉼표로 분리) 형식으로 저장하세요.
-        3. **파일 업로드:** 사이드바의 업로드 칸에 모든 전리품 로그와 창고 로그 파일을 넣습니다. (여러 개 동시 선택 가능)
-        4. **중복 자동 제거:** 여러 명이 동시에 기록했더라도 앱이 자동으로 중복을 제거하여 정확한 수치를 계산합니다.
-        5. **결과 확인:** 표에는 **I The Flying Dutchman I** 길드원이 획득했지만 아직 창고에 입고되지 않은 아이템만 표시됩니다.
-        6. **개별 감사 기능:** '개별 감사' 탭에서 플레이어를 검색하면 해당 인원이 아이템을 넣었는지 추적합니다. (예: Joker가 넣고 Carlun이 안 넣었다면, Carlun만 미입고로 표시됨)
-        
-        **💡 팁:** 게임에서 직접 복사한 텍스트 파일도 앱이 자동으로 '아이템'과 '수량' 컬럼을 찾아냅니다!
-        """
-    },
-    "English": {
-        "title": "🛡️ Guild Loot Auditor (Flying Dutchman Exclusive)",
-        "sidebar_head": "1. Upload Logs",
-        "loot_label": "Upload Loot Logs (.txt)",
-        "chest_label": "Upload Chest Logs (CSV or Copy-Paste TXT)",
-        "tab_full": "Full Report",
-        "tab_player": "Player Audit",
-        "search_label": "👤 Search Player Name",
-        "reset_btn": "Clear All Data",
-        "item_col": "Item Name",
-        "looted_col": "Looted Qty",
-        "chest_col": "In Chests",
-        "miss_col": "Missing",
-        "by_col": "Looted By",
-        "status_col": "Personal Status",
-        "audit_col": "Audit Action (Died/Other)",
-        "banked": "✅ Banked",
-        "missing": "❌ Missing",
-        "instruction_head": "📖 Detailed Instructions (Supports Excel & Copy-Paste)",
-        "instructions": """
-        ### 📋 How to use the Audit Tool
-        1. **Export Loot Logs:** Use your Albion Loot Logger to export the loot data as a `.txt` file.
-        2. **Export Chest Logs (Two supported methods):**
-            * **Method A (Copy-Paste):** Highlight the logs inside the game, copy them, and paste them into a standard Notepad (`.txt`) file.
-            * **Method B (Excel):** If you use Excel to organize logs, save the file as a `.csv` format before uploading.
-        3. **Upload Files:** Drag and drop **all** your loot logs and chest logs into the sidebar.
-        4. **Automatic Cleanup:** The app will automatically remove duplicate lines from multiple recorders.
-        5. **Check Results:** The table only shows items looted by **I The Flying Dutchman I** that are still missing.
-        6. **Strict Name Matching:** This version checks who actually deposited the item. If Joker deposited and Carlun didn't, only Carlun will be flagged as missing.
-        """
-    }
-}
-
 st.set_page_config(page_title="Flying Dutchman Auditor", layout="wide")
 sel_lang = st.sidebar.selectbox("🌐 Language / 언어 선택", list(LANGS.keys()))
 T = LANGS[sel_lang]
@@ -112,7 +39,7 @@ TARGET_GUILD = "I The Flying Dutchman I"
 
 if loot_files and chest_files:
     try:
-        # 1. PROCESS LOOT (With Improved De-duplication)
+        # 1. PROCESS LOOT
         all_loot = []
         for f in loot_files:
             df = robust_read(f)
@@ -124,12 +51,18 @@ if loot_files and chest_files:
             
             if c_item and c_qty:
                 df = df.rename(columns={c_item: 'item_name', c_qty: 'quantity', c_name: 'player', c_guild: 'guild', c_time: 'time'})
+                df['time'] = pd.to_datetime(df['time'])
                 all_loot.append(df)
         
-        # KEY FIX: Deduplicate based on time + player + item_name
-        # This prevents double counting across different uploaders
-        loot_df = pd.concat(all_loot).drop_duplicates(subset=['time', 'player', 'item_name', 'quantity'])
-        loot_df = loot_df[loot_df['guild'] == TARGET_GUILD]
+        combined_loot = pd.concat(all_loot)
+        combined_loot = combined_loot[combined_loot['guild'] == TARGET_GUILD]
+
+        # REFINED DE-DUPLICATION (10-second fuzzy window)
+        # We sort by time, then group by item/player, and remove entries within 10s of each other.
+        combined_loot = combined_loot.sort_values('time')
+        loot_df = combined_loot.groupby(['item_name', 'player', 'quantity']).apply(
+            lambda x: x.loc[x['time'].diff().dt.total_seconds().fillna(11) > 10]
+        ).reset_index(drop=True)
 
         # 2. PROCESS CHEST
         all_chest = []
@@ -183,5 +116,3 @@ if loot_files and chest_files:
 
     except Exception as e:
         st.error(f"Error: {e}")
-else:
-    st.info(f"🛡️ Waiting for {TARGET_GUILD} logs...")
