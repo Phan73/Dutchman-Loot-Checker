@@ -1,9 +1,3 @@
-I see the issue. That NameError at line 1 usually happens in Streamlit if st is used before it is actually defined, or if there's a hidden character at the very beginning of the file when you copy-paste.
-
-In the previous snippet, I accidentally put the language dictionary above the import streamlit as st line in the logic flow. Streamlit requires the imports to be first. I have fixed the order and added a "clean" import block to ensure it runs perfectly.
-
-Updated app.py (Fixed Order & Anti-Double Counting)
-Python
 import streamlit as st
 import pandas as pd
 import re
