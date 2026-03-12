@@ -3,14 +3,14 @@ import pandas as pd
 import re
 import io
 
-# --- 1. SET PAGE CONFIG (MUST BE FIRST) ---
+# --- 1. SET PAGE CONFIG ---
 st.set_page_config(page_title="Flying Dutchman Auditor", layout="wide")
 
-# --- 2. LANGUAGE DICTIONARY (RESTORED ORIGINAL INSTRUCTIONS) ---
+# --- 2. LANGUAGE DICTIONARY (ORIGINAL INSTRUCTIONS PRESERVED) ---
 LANGS = {
     "한국어": {
         "title": "🛡️ 길드 전리품 감사 도구 (Flying Dutchman 독점)",
-        "sidebar_head": "1. 로그 업로드",
+        "sidebar_head": "1. 설정 및 업로드",
         "loot_label": "전리품 로그 업로드 (.txt)",
         "chest_label": "창고 로그 업로드 (CSV 또는 복사본 TXT)",
         "tab_full": "전체 리포트 (Full Report)",
@@ -37,13 +37,11 @@ LANGS = {
         4. **중복 자동 제거:** 여러 명이 동시에 기록했더라도 앱이 자동으로 중복을 제거하여 정확한 수치를 계산합니다.
         5. **결과 확인:** 표에는 **I The Flying Dutchman I** 길드원이 획득했지만 아직 창고에 입고되지 않은 아이템만 표시됩니다.
         6. **개별 감사 기능:** '개별 감사' 탭에서 플레이어를 검색한 후, 해당 인원이 '사망'했는지 등의 여부를 수동으로 체크할 수 있습니다.
-        
-        **💡 팁:** 게임에서 직접 복사한 텍스트 파일도 앱이 자동으로 '아이템'과 '수량' 컬럼을 찾아냅니다!
         """
     },
     "English": {
         "title": "🛡️ Guild Loot Auditor (Flying Dutchman Exclusive)",
-        "sidebar_head": "1. Upload Logs",
+        "sidebar_head": "1. Settings & Upload",
         "loot_label": "Upload Loot Logs (.txt)",
         "chest_label": "Upload Chest Logs (CSV or Copy-Paste TXT)",
         "tab_full": "Full Report",
@@ -81,6 +79,18 @@ st.title(T["title"])
 with st.expander(T["instruction_head"], expanded=True):
     st.markdown(T["instructions"])
 
+# --- 3. TIER EQUIVALENT CALCULATOR ---
+def get_tier_equiv(item_id):
+    if not isinstance(item_id, str): return 0
+    # Match T4, T5, etc.
+    t_match = re.search(r'T(\d)', item_id)
+    # Match @1, @2, @3, @4
+    e_match = re.search(r'@(\d)', item_id)
+    
+    tier = int(t_match.group(1)) if t_match else 0
+    enchant = int(e_match.group(1)) if e_match else 0
+    return tier + enchant
+
 # --- HELPERS ---
 def simplify(text):
     return re.sub(r'[^a-z0-9]', '', str(text).lower())
@@ -101,7 +111,14 @@ def robust_read(file):
         if len(df.columns) > 1: return df
     return pd.read_csv(io.StringIO(content), engine='python')
 
-# --- SIDEBAR & DATA RESET ---
+# --- SIDEBAR SETTINGS ---
+st.sidebar.header("⚙️ Filters")
+min_tier = st.sidebar.slider("Min Tier Equivalent (e.g. 7 = 5.2, 6.1, 7.0)", 1, 12, 4)
+
+show_mounts = st.sidebar.checkbox("Include Mounts", True)
+show_consumables = st.sidebar.checkbox("Include Food/Potions", True)
+show_bags_capes = st.sidebar.checkbox("Include Bags/Capes", True)
+
 if st.sidebar.button(T["reset_btn"]):
     st.cache_data.clear()
     st.rerun()
@@ -118,20 +135,21 @@ if loot_files and chest_files:
         for f in loot_files:
             df = robust_read(f)
             c_item = find_best_column(df, ['itemname', 'item'])
+            c_id = find_best_column(df, ['itemid', 'id'])
             c_qty = find_best_column(df, ['quantity', 'qty', 'amount'])
             c_name = find_best_column(df, ['lootedbyname', 'looter', 'player'])
             c_guild = find_best_column(df, ['lootedbyguild', 'guild'])
             c_time = find_best_column(df, ['timestamputc', 'date', 'time'])
             
             if c_item and c_qty:
-                df = df.rename(columns={c_item: 'item_name', c_qty: 'quantity', c_name: 'player', c_guild: 'guild', c_time: 'time'})
+                df = df.rename(columns={c_item: 'item_name', c_id: 'item_id', c_qty: 'quantity', c_name: 'player', c_guild: 'guild', c_time: 'time'})
                 df['time'] = pd.to_datetime(df['time'], errors='coerce')
                 all_loot.append(df)
         
         raw_loot = pd.concat(all_loot).dropna(subset=['time'])
         raw_loot = raw_loot[raw_loot['guild'] == TARGET_GUILD]
 
-        # --- FUZZY DE-DUPLICATION (15s Window) ---
+        # --- FUZZY DE-DUPLICATION ---
         raw_loot = raw_loot.sort_values(by=['player', 'item_name', 'time'])
         is_duplicate = (
             (raw_loot['player'] == raw_loot['player'].shift()) &
@@ -139,6 +157,19 @@ if loot_files and chest_files:
             (raw_loot['time'].diff().dt.total_seconds() < 15)
         )
         loot_df = raw_loot[~is_duplicate].copy()
+
+        # --- APPLY FILTERS ---
+        loot_df['tier_equiv'] = loot_df['item_id'].apply(get_tier_equiv)
+        
+        # Filtering logic
+        loot_df = loot_df[loot_df['tier_equiv'] >= min_tier]
+        
+        if not show_mounts:
+            loot_df = loot_df[~loot_df['item_id'].str.contains('MOUNT', na=False)]
+        if not show_consumables:
+            loot_df = loot_df[~loot_df['item_id'].str.contains('POTION|MEAL|FOOD', na=False, case=False)]
+        if not show_bags_capes:
+            loot_df = loot_df[~loot_df['item_id'].str.contains('BAG|CAPE', na=False)]
 
         # 2. PROCESS CHEST
         all_chest = []
@@ -185,4 +216,3 @@ if loot_files and chest_files:
         st.error(f"Error: {e}")
 else:
     st.info(f"🛡️ Waiting for {TARGET_GUILD} logs...")
-
