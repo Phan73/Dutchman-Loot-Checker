@@ -112,7 +112,7 @@ TARGET_GUILD = "I The Flying Dutchman I"
 
 if loot_files and chest_files:
     try:
-        # 1. PROCESS LOOT
+        # 1. PROCESS LOOT (With Improved De-duplication)
         all_loot = []
         for f in loot_files:
             df = robust_read(f)
@@ -120,16 +120,18 @@ if loot_files and chest_files:
             c_qty = find_best_column(df, ['quantity', 'qty', 'amount'])
             c_name = find_best_column(df, ['lootedbyname', 'looter', 'player'])
             c_guild = find_best_column(df, ['lootedbyguild', 'guild'])
-            c_time = find_best_column(df, ['timestamputc', 'date'])
-            c_id = find_best_column(df, ['itemid', 'id'])
+            c_time = find_best_column(df, ['timestamputc', 'date', 'time'])
+            
             if c_item and c_qty:
-                df = df.rename(columns={c_item: 'item_name', c_qty: 'quantity', c_name: 'player', c_guild: 'guild', c_time: 'time', c_id: 'id'})
+                df = df.rename(columns={c_item: 'item_name', c_qty: 'quantity', c_name: 'player', c_guild: 'guild', c_time: 'time'})
                 all_loot.append(df)
         
-        loot_df = pd.concat(all_loot).drop_duplicates(subset=['time', 'player', 'id'])
+        # KEY FIX: Deduplicate based on time + player + item_name
+        # This prevents double counting across different uploaders
+        loot_df = pd.concat(all_loot).drop_duplicates(subset=['time', 'player', 'item_name', 'quantity'])
         loot_df = loot_df[loot_df['guild'] == TARGET_GUILD]
 
-        # 2. PROCESS CHEST (With Player-Specific Logic)
+        # 2. PROCESS CHEST
         all_chest = []
         for f in chest_files:
             df = robust_read(f)
