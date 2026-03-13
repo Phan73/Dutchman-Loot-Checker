@@ -1,8 +1,89 @@
+import streamlit as st
+import pandas as pd
+import re
+import io
+
+# --- 1. SET PAGE CONFIG ---
+st.set_page_config(page_title="Flying Dutchman Auditor", layout="wide")
+
+# --- 2. LANGUAGE DICTIONARY (INTEGRATED SPECIFIC INSTRUCTIONS) ---
+LANGS = {
+    "한국어": {
+        "title": "🛡️ 길드 전리품 감사 도구 (Flying Dutchman 독점)",
+        "sidebar_head": "1. 설정 및 업로드",
+        "loot_label": "전리품 로그 업로드 (.txt)",
+        "chest_label": "창고 로그 업로드 (CSV 또는 복사본 TXT)",
+        "tab_full": "전체 리포트 (Full Report)",
+        "tab_player": "개별 감사 (Player Audit)",
+        "tab_history": "창고 입고 내역 (Chest History)",
+        "search_label": "👤 감사할 플레이어 (Looter)",
+        "trade_label": "🤝 아이템을 대신 받은 사람 (Officer/Caller)",
+        "reset_btn": "모든 데이터 초기화 (Reset)",
+        "item_col": "아이템 이름",
+        "looted_col": "획득량",
+        "chest_col": "창고 입고됨",
+        "miss_col": "누락됨",
+        "by_col": "획득자 명단",
+        "status_col": "개인 상태",
+        "audit_col": "수동 체크 (사망/거래)",
+        "banked": "✅ 입고됨",
+        "missing": "❌ 미입고",
+        "instruction_head": "📖 상세 사용 방법 (Usage Guide)",
+        "instructions": """
+        ### 📋 감사 도구 사용 가이드
+        1. **전리품 로그 내보내기:** Albion Loot Logger를 사용하여 데이터를 `.txt` 파일로 저장하세요.
+        2. **창고 로그 내보내기 (두 가지 방법):**
+            * **방법 A (복사-붙여넣기):** 게임 내 로그를 드래그하여 복사한 후 메모장(`.txt`)에 붙여넣어 저장하세요.
+            * **방법 B (Excel):** 엑셀을 사용 중이라면 `.csv` 형식으로 저장하여 업로드하세요.
+        3. **파일 업로드:** 사이드바에 **모든** 전리품 로그와 창고 로그를 드래그 앤 드롭 하세요.
+        4. **자동 정리:** 이 버전은 로그에 길드 이름이 누락되거나 시간 오차가 있어도 중복 계산을 자동으로 방지합니다.
+        5. **결과 확인:** **I The Flying Dutchman I** 길드원이 획득한 아이템만 표시됩니다.
+        6. **거래 확인 (New):** '개별 감사' 탭에서 오피서 이름을 입력하면, 루터가 건네준 템이 오피서 창고에 들어갔는지 자동 대조됩니다.
+        7. **수동 감사 (New):** 로그에 찍히지 않은 사망이나 특이사항은 표의 '수동 체크' 열에서 직접 상태를 변경할 수 있습니다.
+        """
+    },
+    "English": {
+        "title": "🛡️ Guild Loot Auditor (Flying Dutchman Exclusive)",
+        "sidebar_head": "1. Settings & Upload",
+        "loot_label": "Upload Loot Logs (.txt)",
+        "chest_label": "Upload Chest Logs (CSV or Copy-Paste TXT)",
+        "tab_full": "Full Report",
+        "tab_player": "Player Audit",
+        "tab_history": "Chest History",
+        "search_label": "👤 Search Looter Name",
+        "trade_label": "🤝 Officer Name (Single Entry)",
+        "reset_btn": "Clear All Data",
+        "item_col": "Item Name",
+        "looted_col": "Looted Qty",
+        "chest_col": "In Chests",
+        "miss_col": "Missing",
+        "by_col": "Looted By",
+        "status_col": "Looter Status",
+        "audit_col": "Manual Audit (Died/Traded)",
+        "banked": "✅ Banked",
+        "missing": "❌ Missing",
+        "instruction_head": "📖 Detailed Instructions",
+        "instructions": """
+        ### 📋 How to use the Audit Tool
+        1. **Export Loot Logs:** Use your Albion Loot Logger to export the loot data as a `.txt` file.
+        2. **Export Chest Logs (Two supported methods):**
+            * **Method A (Copy-Paste):** Highlight the logs inside the game, copy them, and paste them into a standard Notepad (`.txt`) file.
+            * **Method B (Excel):** If you use Excel to organize logs, save the file as a `.csv` format before uploading.
+        3. **Upload Files:** Drag and drop **all** your loot logs and chest logs into the sidebar.
+        4. **Automatic Cleanup:** This version fixes double counting even if one log file is missing guild names or has time offsets.
+        5. **Check Results:** Only items looted by **I The Flying Dutchman I** are shown.
+        6. **Trade Verification (New):** In the 'Player Audit' tab, enter the Officer's name to automatically verify if missing items were banked by them.
+        7. **Manual Audit (New):** Use the dropdown in the 'Manual Audit' column to mark if a player died or traded the item manually if not captured in logs.
+        """
+    }
+}
 
 sel_lang = st.sidebar.selectbox("🌐 Language", list(LANGS.keys()))
 T = LANGS[sel_lang]
 
 st.title(T["title"])
+with st.expander(T["instruction_head"], expanded=False):
+    st.markdown(T["instructions"])
 
 # --- HELPERS ---
 def get_tier_equiv(item_id):
@@ -65,7 +146,7 @@ if loot_files and chest_files:
                 if c_id: rename_map[c_id] = 'item_id'
                 if c_guild: rename_map[c_guild] = 'guild'
                 df = df.rename(columns=rename_map)
-                if 'item_id' not in df.columns: df['item_id'] = "" # Anti-KeyError Fix
+                if 'item_id' not in df.columns: df['item_id'] = ""
                 df['time'] = pd.to_datetime(df['time'], errors='coerce')
                 processed_dfs.append(df)
         
@@ -98,7 +179,7 @@ if loot_files and chest_files:
         chest_totals = chest_full_df.groupby('Item')['Amount'].sum().to_dict()
         chest_player_totals = chest_full_df.groupby(['Item', 'ChestPlayer'])['Amount'].sum().reset_index()
 
-        # 3. INTERFACE
+        # 3. TABS
         tab1, tab2, tab3 = st.tabs([T["tab_full"], T["tab_player"], T["tab_history"]])
 
         with tab1:
@@ -107,13 +188,8 @@ if loot_files and chest_files:
             l_sum['Miss'] = l_sum['quantity'] - l_sum['In_Chest']
             report_df = l_sum[l_sum['Miss'] > 0].copy()
             if not report_df.empty:
-                # Use the restored dictionary keys here
                 report_df = report_df.rename(columns={
-                    'item_name': T["item_col"], 
-                    'quantity': T["looted_col"], 
-                    'In_Chest': T["chest_col"], 
-                    'Miss': T["miss_col"], 
-                    'player': T["by_col"]
+                    'item_name': T["item_col"], 'quantity': T["looted_col"], 'In_Chest': T["chest_col"], 'Miss': T["miss_col"], 'player': T["by_col"]
                 })
                 st.dataframe(report_df, use_container_width=True, hide_index=True)
 
@@ -132,7 +208,6 @@ if loot_files and chest_files:
                         m = chest_player_totals[(chest_player_totals['Item'] == row['item_name']) & (chest_player_totals['ChestPlayer'].str.contains(row['player'], case=False, na=False))]
                         lb = m['Amount'].sum() if not m.empty else 0
                         is_missing = lb < row['quantity']
-                        
                         v_status = "---"
                         if is_missing and trade_name:
                             t_m = chest_player_totals[(chest_player_totals['Item'] == row['item_name']) & (chest_player_totals['ChestPlayer'].str.contains(trade_name, case=False, na=False))]
@@ -140,29 +215,14 @@ if loot_files and chest_files:
                                 v_status = f"✅ Banked by {trade_name}"
                             else:
                                 v_status = f"❌ Missing from {trade_name}"
-                        
                         audit_rows.append({
-                            T["item_col"]: row['item_name'],
-                            T["looted_col"]: row['quantity'],
-                            T["status_col"]: T["banked"] if not is_missing else T["missing"],
-                            "Trade Verification": v_status,
-                            T["audit_col"]: "None" 
+                            T["item_col"]: row['item_name'], T["looted_col"]: row['quantity'], T["status_col"]: T["banked"] if not is_missing else T["missing"], "Trade Verification": v_status, T["audit_col"]: "None"
                         })
-                    
-                    # INTERACTIVE DATA EDITOR
                     st.data_editor(
                         pd.DataFrame(audit_rows),
-                        column_config={
-                            T["audit_col"]: st.column_config.SelectboxColumn(
-                                T["audit_col"],
-                                options=["None", "Died (Executed)", "Traded (Manual)", "Penalty"],
-                                required=True,
-                            )
-                        },
+                        column_config={T["audit_col"]: st.column_config.SelectboxColumn(T["audit_col"], options=["None", "Died (Executed)", "Traded (Manual)", "Penalty"], required=True)},
                         disabled=[T["item_col"], T["looted_col"], T["status_col"], "Trade Verification"],
-                        hide_index=True,
-                        use_container_width=True,
-                        key="player_manual_editor"
+                        hide_index=True, use_container_width=True, key="player_manual_editor"
                     )
 
         with tab3:
