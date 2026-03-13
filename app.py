@@ -179,6 +179,10 @@ if loot_files and chest_files:
         chest_totals = chest_full_df.groupby('Item')['Amount'].sum().to_dict()
         chest_player_totals = chest_full_df.groupby(['Item', 'ChestPlayer'])['Amount'].sum().reset_index()
 
+        # --- DYNAMIC NAME LISTS ---
+        looter_list = sorted(loot_df['player'].dropna().unique().tolist())
+        banker_list = sorted(chest_full_df['ChestPlayer'].dropna().unique().tolist())
+
         # 3. TABS
         tab1, tab2, tab3 = st.tabs([T["tab_full"], T["tab_player"], T["tab_history"]])
 
@@ -194,30 +198,40 @@ if loot_files and chest_files:
                 st.dataframe(report_df, use_container_width=True, hide_index=True)
 
         with tab2:
-            st.subheader("🔍 Individual Audit & Manual Check")
+            st.subheader("🔍 Individual Audit & Trade Check")
             ca, cb = st.columns(2)
-            search_p = ca.text_input(T["search_label"], key="p_audit_s").strip()
-            trade_name = cb.text_input(T["trade_label"], key="global_t_n").strip()
+            
+            # --- AUTO-FILL SEARCHABLE DROPDOWNS ---
+            search_p = ca.selectbox(T["search_label"], options=looter_list, index=None, placeholder="Type looter name (e.g. 'bad')...")
+            trade_name = cb.selectbox(T["trade_label"], options=banker_list, index=None, placeholder="Type officer name to verify trade...")
             
             if search_p:
                 p_sum = loot_df.groupby(['item_name', 'player'])['quantity'].sum().reset_index()
-                spec_p = p_sum[p_sum['player'].str.contains(search_p, case=False, na=False)].copy()
+                spec_p = p_sum[p_sum['player'] == search_p].copy()
+                
                 if not spec_p.empty:
                     audit_rows = []
                     for _, row in spec_p.iterrows():
-                        m = chest_player_totals[(chest_player_totals['Item'] == row['item_name']) & (chest_player_totals['ChestPlayer'].str.contains(row['player'], case=False, na=False))]
+                        m = chest_player_totals[(chest_player_totals['Item'] == row['item_name']) & (chest_player_totals['ChestPlayer'] == row['player'])]
                         lb = m['Amount'].sum() if not m.empty else 0
                         is_missing = lb < row['quantity']
+                        
                         v_status = "---"
                         if is_missing and trade_name:
-                            t_m = chest_player_totals[(chest_player_totals['Item'] == row['item_name']) & (chest_player_totals['ChestPlayer'].str.contains(trade_name, case=False, na=False))]
+                            t_m = chest_player_totals[(chest_player_totals['Item'] == row['item_name']) & (chest_player_totals['ChestPlayer'] == trade_name)]
                             if t_m['Amount'].sum() >= (row['quantity'] - lb):
                                 v_status = f"✅ Banked by {trade_name}"
                             else:
                                 v_status = f"❌ Missing from {trade_name}"
+                        
                         audit_rows.append({
-                            T["item_col"]: row['item_name'], T["looted_col"]: row['quantity'], T["status_col"]: T["banked"] if not is_missing else T["missing"], "Trade Verification": v_status, T["audit_col"]: "None"
+                            T["item_col"]: row['item_name'], 
+                            T["looted_col"]: row['quantity'], 
+                            T["status_col"]: T["banked"] if not is_missing else T["missing"], 
+                            "Trade Verification": v_status, 
+                            T["audit_col"]: "None"
                         })
+                    
                     st.data_editor(
                         pd.DataFrame(audit_rows),
                         column_config={T["audit_col"]: st.column_config.SelectboxColumn(T["audit_col"], options=["None", "Died (Executed)", "Traded (Manual)", "Penalty"], required=True)},
@@ -226,11 +240,13 @@ if loot_files and chest_files:
                     )
 
         with tab3:
-            search_hist = st.text_input(T["search_label"], key="h_audit_s").strip()
+            # --- AUTO-FILL SEARCHABLE DROPDOWN ---
+            search_hist = st.selectbox(T["search_label"], options=banker_list, index=None, placeholder="Type name to view chest history...", key="h_audit_select")
             if search_hist:
-                history = chest_full_df[chest_full_df['ChestPlayer'].str.contains(search_hist, case=False, na=False)]
+                history = chest_full_df[chest_full_df['ChestPlayer'] == search_hist]
                 if not history.empty:
                     st.dataframe(history[['ChestTime', 'Item', 'Amount']].sort_values(by='ChestTime', ascending=False), use_container_width=True, hide_index=True)
 
     except Exception as e:
         st.error(f"Error: {e}")
+
