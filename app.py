@@ -77,7 +77,6 @@ LANGS = {
         """
     }
 }
-
 sel_lang = st.sidebar.selectbox("🌐 Language", list(LANGS.keys()))
 T = LANGS[sel_lang]
 
@@ -133,6 +132,9 @@ def robust_read(file):
     
     if df is not None:
         df.columns = [str(c).replace('"', '').strip() for c in df.columns]
+        # Clean strings in all object columns
+        for col in df.select_dtypes(['object']).columns:
+            df[col] = df[col].astype(str).str.replace('"', '').str.strip()
         return df
     return pd.read_csv(io.StringIO(content), engine='python')
 
@@ -146,8 +148,6 @@ if st.sidebar.button(T["reset_btn"]):
 
 loot_files = st.sidebar.file_uploader(T["loot_label"], type=['txt', 'csv'], accept_multiple_files=True)
 chest_files = st.sidebar.file_uploader(T["chest_label"], type=['txt', 'csv'], accept_multiple_files=True)
-
-TARGET_GUILD = "I The Flying Dutchman I"
 
 if loot_files and chest_files:
     try:
@@ -189,13 +189,11 @@ if loot_files and chest_files:
         
         chest_df = pd.concat(all_chest)
         chest_totals = chest_df.groupby('match_name')['Amount'].sum().to_dict()
-        chest_player_totals = chest_df.groupby(['match_name', 'ChestPlayer'])['Amount'].sum().reset_index()
 
         # DROPDOWN LISTS
         looter_list = sorted(loot_df['player'].dropna().unique().tolist())
         banker_list = sorted(chest_df['ChestPlayer'].dropna().unique().tolist())
 
-        # 3. TABS
         tab1, tab2, tab3 = st.tabs([T["tab_full"], T["tab_player"], T["tab_history"]])
 
         with tab1:
@@ -213,12 +211,18 @@ if loot_files and chest_files:
                 p_sum = loot_df[loot_df['player'] == search_p].groupby(['match_name', 'item_name'])['quantity'].sum().reset_index()
                 audit_rows = []
                 for _, row in p_sum.iterrows():
-                    in_bank = int(chest_df[(chest_df['ChestPlayer'] == search_p) & (chest_df['match_name'] == row['match_name'])]['Amount'].sum())
+                    # FIX: Case-insensitive search for looter
+                    in_bank = int(chest_df[(chest_df['ChestPlayer'].str.lower() == search_p.lower()) & (chest_df['match_name'] == row['match_name'])]['Amount'].sum())
                     looted_qty = int(row['quantity'])
                     v_status = "---"
+                    
                     if in_bank < looted_qty and trade_name:
-                        off_bank = int(chest_df[(chest_df['ChestPlayer'] == trade_name) & (chest_df['match_name'] == row['match_name'])]['Amount'].sum())
-                        v_status = f"✅ Banked by {trade_name}" if off_bank >= (looted_qty - in_bank) else f"❌ Missing"
+                        # FIX: Case-insensitive search for Officer
+                        off_bank = int(chest_df[(chest_df['ChestPlayer'].str.lower() == trade_name.lower()) & (chest_df['match_name'] == row['match_name'])]['Amount'].sum())
+                        if off_bank >= (looted_qty - in_bank):
+                            v_status = f"✅ Banked by {trade_name}"
+                        else:
+                            v_status = f"❌ Missing"
                     
                     audit_rows.append({
                         T["item_col"]: row['item_name'], T["looted_col"]: looted_qty, 
@@ -230,7 +234,8 @@ if loot_files and chest_files:
         with tab3:
             search_hist = st.selectbox(T["search_label"], options=banker_list, index=None, key="hist")
             if search_hist:
-                st.dataframe(chest_df[chest_df['ChestPlayer'] == search_hist][['Item', 'Amount']].sort_values(by='Item'), use_container_width=True, hide_index=True)
+                # FIX: Case-insensitive history search
+                st.dataframe(chest_df[chest_df['ChestPlayer'].str.lower() == search_hist.lower()][['Item', 'Amount']].sort_values(by='Item'), use_container_width=True, hide_index=True)
 
     except Exception as e:
         st.error(f"Error: {e}")
