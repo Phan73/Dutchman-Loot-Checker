@@ -79,12 +79,13 @@ LANGS = {
 }
 sel_lang = st.sidebar.selectbox("🌐 Language", list(LANGS.keys()))
 T = LANGS[sel_lang]
-
 st.title(T["title"])
+
 with st.expander(T["instruction_head"], expanded=False):
     st.markdown(T["instructions"])
 
-# --- 3. TRANSLATION MAP ---
+# --- 3. CONFIG & TRANSLATION ---
+TARGET_GUILD = "I The Flying Dutchman I"
 TRANSLATION_MAP = {
     "양배추 스프": "Cabbage Soup",
     "대형 채집 포션": "Major Gathering Potion",
@@ -119,7 +120,6 @@ def robust_read(file):
     raw_data = file.read()
     try: content = raw_data.decode('utf-8-sig')
     except: content = raw_data.decode('latin1')
-    
     df = None
     if '\t' in content: 
         df = pd.read_csv(io.StringIO(content), sep='\t', engine='python', on_bad_lines='skip', quotechar='"')
@@ -129,68 +129,74 @@ def robust_read(file):
             if len(temp_df.columns) > 1:
                 df = temp_df
                 break
-    
     if df is not None:
         df.columns = [str(c).replace('"', '').strip() for c in df.columns]
-        # Clean strings in all object columns
         for col in df.select_dtypes(['object']).columns:
             df[col] = df[col].astype(str).str.replace('"', '').str.strip()
         return df
-    return pd.read_csv(io.StringIO(content), engine='python')
+    return pd.DataFrame()
 
-# --- 5. SIDEBAR & LOGIC ---
+# --- 5. LOGIC ---
 st.sidebar.header("⚙️ Filters")
 min_tier = st.sidebar.slider("Min Tier Equivalent", 1, 12, 4)
-
-if st.sidebar.button(T["reset_btn"]):
-    st.cache_data.clear()
-    st.rerun()
 
 loot_files = st.sidebar.file_uploader(T["loot_label"], type=['txt', 'csv'], accept_multiple_files=True)
 chest_files = st.sidebar.file_uploader(T["chest_label"], type=['txt', 'csv'], accept_multiple_files=True)
 
 if loot_files and chest_files:
     try:
-        # 1. PROCESS LOOT
-        all_loot = []
+        # 1. PROCESS LOOT (WITH DUPLICATE & GUILD FIX)
+        all_loot_list = []
         for f in loot_files:
             df = robust_read(f)
-            c_item = find_best_column(df, ['itemname', 'item', '아이템', '이름'])
+            c_item = find_best_column(df, ['itemname', 'item', '아이템'])
             c_qty = find_best_column(df, ['quantity', 'qty', 'amount', '수량'])
-            c_name = find_best_column(df, ['lootedbyname', 'looter', 'player', '플레이어'])
-            c_id = find_best_column(df, ['item_id', 'itemid', 'id'])
+            c_name = find_best_column(df, ['lootedbyname', 'looter', 'player'])
+            c_guild = find_best_column(df, ['lootedbyguild', 'guild', '길드'])
             c_time = find_best_column(df, ['timestamputc', 'date', 'time'])
+            c_id = find_best_column(df, ['item_id', 'itemid'])
             
             if c_item and c_qty:
                 df = df.rename(columns={c_item: 'item_name', c_qty: 'quantity', c_name: 'player', c_time: 'time', c_id: 'item_id'})
+                if c_guild: df = df.rename(columns={c_guild: 'guild'})
+                else: df['guild'] = TARGET_GUILD # Default to target if missing
+                
                 df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0).astype(int)
                 df['match_name'] = df['item_name'].apply(standardize)
                 df['time'] = pd.to_datetime(df['time'], errors='coerce')
-                all_loot.append(df)
+                all_loot_list.append(df)
         
-        full_loot = pd.concat(all_loot)
-        is_duplicate = ((full_loot['player'] == full_loot['player'].shift()) & (full_loot['match_name'] == full_loot['match_name'].shift()) & (full_loot['time'].diff().dt.total_seconds().abs() < 20))
-        loot_df = full_loot[~is_duplicate].copy()
+        full_loot = pd.concat(all_loot_list, ignore_index=True)
+        
+        # FIX 1: RESTRICT TO GUILD
+        loot_df = full_loot[full_loot['guild'].str.contains(TARGET_GUILD, na=False, case=False)].copy()
+        
+        # FIX 2: STRICT MULTI-LOG DUPLICATE REMOVAL
+        # Sort by time. If same item is looted by same player within 5 seconds in different files, delete it.
+        loot_df = loot_df.sort_values(by=['time', 'player', 'match_name'])
+        loot_df = loot_df[~((loot_df['player'] == loot_df['player'].shift()) & 
+                           (loot_df['match_name'] == loot_df['match_name'].shift()) & 
+                           (loot_df['time'].diff().dt.total_seconds().abs() < 5))]
+
         loot_df['tier_equiv'] = loot_df['item_id'].apply(get_tier_equiv)
         loot_df = loot_df[loot_df['tier_equiv'] >= min_tier]
 
         # 2. PROCESS CHEST
-        all_chest = []
+        all_chest_list = []
         for f in chest_files:
             df = robust_read(f)
-            c_item_ch = find_best_column(df, ['item', 'itemname', '아이템'])
-            c_qty_ch = find_best_column(df, ['amount', 'quantity', '수량'])
-            c_user_ch = find_best_column(df, ['player', 'user', 'name', '사용자'])
+            c_item_ch = find_best_column(df, ['item', 'itemname'])
+            c_qty_ch = find_best_column(df, ['amount', 'quantity'])
+            c_user_ch = find_best_column(df, ['player', 'user', 'name'])
             if c_item_ch and c_qty_ch:
                 df = df.rename(columns={c_item_ch: 'Item', c_qty_ch: 'Amount', c_user_ch: 'ChestPlayer'})
                 df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0).astype(int)
                 df['match_name'] = df['Item'].apply(standardize)
-                all_chest.append(df)
+                all_chest_list.append(df)
         
-        chest_df = pd.concat(all_chest)
+        chest_df = pd.concat(all_chest_list, ignore_index=True)
         chest_totals = chest_df.groupby('match_name')['Amount'].sum().to_dict()
 
-        # DROPDOWN LISTS
         looter_list = sorted(loot_df['player'].dropna().unique().tolist())
         banker_list = sorted(chest_df['ChestPlayer'].dropna().unique().tolist())
 
@@ -208,21 +214,16 @@ if loot_files and chest_files:
             trade_name = cb.selectbox(T["trade_label"], options=banker_list, index=None)
             
             if search_p:
-                p_sum = loot_df[loot_df['player'] == search_p].groupby(['match_name', 'item_name'])['quantity'].sum().reset_index()
+                p_sum = loot_df[loot_df['player'].str.lower() == search_p.lower()].groupby(['match_name', 'item_name'])['quantity'].sum().reset_index()
                 audit_rows = []
                 for _, row in p_sum.iterrows():
-                    # FIX: Case-insensitive search for looter
                     in_bank = int(chest_df[(chest_df['ChestPlayer'].str.lower() == search_p.lower()) & (chest_df['match_name'] == row['match_name'])]['Amount'].sum())
                     looted_qty = int(row['quantity'])
                     v_status = "---"
                     
                     if in_bank < looted_qty and trade_name:
-                        # FIX: Case-insensitive search for Officer
                         off_bank = int(chest_df[(chest_df['ChestPlayer'].str.lower() == trade_name.lower()) & (chest_df['match_name'] == row['match_name'])]['Amount'].sum())
-                        if off_bank >= (looted_qty - in_bank):
-                            v_status = f"✅ Banked by {trade_name}"
-                        else:
-                            v_status = f"❌ Missing"
+                        v_status = f"✅ Banked by {trade_name}" if off_bank >= (looted_qty - in_bank) else f"❌ Missing"
                     
                     audit_rows.append({
                         T["item_col"]: row['item_name'], T["looted_col"]: looted_qty, 
@@ -234,7 +235,6 @@ if loot_files and chest_files:
         with tab3:
             search_hist = st.selectbox(T["search_label"], options=banker_list, index=None, key="hist")
             if search_hist:
-                # FIX: Case-insensitive history search
                 st.dataframe(chest_df[chest_df['ChestPlayer'].str.lower() == search_hist.lower()][['Item', 'Amount']].sort_values(by='Item'), use_container_width=True, hide_index=True)
 
     except Exception as e:
