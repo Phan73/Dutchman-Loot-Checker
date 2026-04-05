@@ -222,26 +222,36 @@ if loot_files and chest_files:
                 p_loot = loot_df[loot_df['player'] == search_p].groupby('match_name')['qty'].sum().reset_index()
                 audit_rows = []
                 for _, row in p_loot.iterrows():
+                    # Check player's own bank
                     in_bank = int(chest_df[(chest_df['player'] == search_p) & (chest_df['match_name'] == row['match_name'])]['qty'].sum())
                     
                     v_status = "---"
-                    if in_bank < row['qty'] and trade_names:
+                    is_accounted = (in_bank >= row['qty']) 
+                    
+                    # Check selected officers if missing from own bank
+                    if not is_accounted and trade_names:
                         off_matches = chest_df[(chest_df['player'].isin(trade_names)) & (chest_df['match_name'] == row['match_name']) & (chest_df['qty'] > 0)].groupby('player')['qty'].sum()
                         if not off_matches.empty:
                             v_status = "✅ Team: " + ", ".join([f"{n} ({int(a)})" for n, a in off_matches.items()])
+                            is_accounted = True 
+                        else:
+                            v_status = "❌ Not found in selection"
                     
                     audit_rows.append({
-                        "Item": row['match_name'], 
-                        "Looted Qty": row['qty'], 
+                        T["item_col"]: row['match_name'], 
+                        T["looted_col"]: row['qty'], 
                         "Own Bank": in_bank,
-                        "System Status": T["banked"] if in_bank >= row['qty'] else T["missing"],
+                        T["status_col"]: T["banked"] if in_bank >= row['qty'] else T["missing"],
                         "Officer Match": v_status,
-                        T["audit_col"]: "None"
+                        T["audit_col"]: "None",
+                        "_sort_priority": 0 if is_accounted else 1 # Logic: 0 = Top, 1 = Bottom
                     })
                 
-                # Pro-Table with Manual Override Dropdowns (st.data_editor)
+                # Convert to DataFrame, sort by priority, then remove the hidden column
+                audit_df = pd.DataFrame(audit_rows).sort_values("_sort_priority").drop(columns=["_sort_priority"])
+                
                 st.data_editor(
-                    pd.DataFrame(audit_rows), 
+                    audit_df, 
                     use_container_width=True, 
                     hide_index=True, 
                     column_config={T["audit_col"]: st.column_config.SelectboxColumn(options=["None", "Died", "Traded", "Penalty"])}
