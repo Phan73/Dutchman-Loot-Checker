@@ -21,35 +21,35 @@ Ensure you have **Python 3.9 or higher** installed. You can check your version b
 
 ### 2. Clone the Repository
 Download the code to your machine:
+`git clone https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git`
+`cd YOUR_REPO_NAME`
 
-git clone [https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git](https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git)
-cd YOUR_REPO_NAME
-
-###3. Set Up a Virtual Environment (Recommended)
+### 3. Set Up a Virtual Environment (Recommended)
 This keeps your project dependencies isolated from your main system:
 
-# Windows
-python -m venv venv
-.\venv\Scripts\activate
+**Windows:**
+`python -m venv venv`
+`.\venv\Scripts\activate`
 
-# Mac/Linux
-python3 -m venv venv
-source venv/bin/activate
+**Mac/Linux:**
+`python3 -m venv venv`
+`source venv/bin/activate`
 
-4. Install Dependencies
+### 4. Install Dependencies
 Install all required libraries using the provided requirements file:
-pip install -r requirements.txt
+`pip install -r requirements.txt`
 
-5. Run the Application
+### 5. Run the Application
 Start the Streamlit server:
-streamlit run app.py
-📖 Usage Guide
-Loot Logs: Upload your .txt files exported from the Albion Loot Logger.
+`streamlit run app.py`
 
-Chest Logs: Upload your .csv or copy-pasted .txt logs from the in-game chest history.
+The app should automatically open in your default web browser at `http://localhost:8501`.
 
-Audit: - Use the Full Report for a guild-wide overview.
+---
 
-Use Player Audit to check a specific member. Select "Officer Names" to see if the missing items were traded to a lead.
-
-Export: Hover over any table to download the results as a CSV for guild records.
+## 📖 Usage Guide
+1. **Loot Logs:** Upload your `.txt` files exported from the Albion Loot Logger.
+2. **Chest Logs:** Upload your `.csv` or copy-pasted `.txt` logs from the in-game chest history.
+3. **Audit:** - Use the **Full Report** for a guild-wide overview.
+   - Use **Player Audit** to check a specific member. Select "Officer Names" to see if the missing items were traded to a lead.
+4. **Export:** Hover over any table to download the results as a CSV for guild records.
