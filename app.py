@@ -135,7 +135,7 @@ def robust_read(file):
 # --- 5. SIDEBAR FILTERS ---
 st.sidebar.header("⚙️ Settings")
 min_tier = st.sidebar.slider("Min Tier Equivalent", 1, 12, 4)
-buffer_val = st.sidebar.select_slider("Sync Window (Seconds)", options=[1, 2, 3, 5, 10], value=2)
+buffer_val = st.sidebar.select_slider("Sync Window (Seconds)", options=[1, 2, 3, 5, 10,360], value=2)
 buffer_str = f"{buffer_val}s"
 
 loot_files = st.sidebar.file_uploader(T["loot_label"], type=['txt', 'csv'], accept_multiple_files=True)
