@@ -6,7 +6,7 @@ import io
 # --- 1. SET PAGE CONFIG ---
 st.set_page_config(page_title="Flying Dutchman Auditor", layout="wide")
 
-# --- 2. LANGUAGE DICTIONARY (FULLY RESTORED INSTRUCTIONS) ---
+# --- 2. LANGUAGE DICTIONARY ---
 LANGS = {
     "한국어": {
         "title": "🛡️ 길드 전리품 감사 도구 (Flying Dutchman 독점)",
@@ -21,6 +21,7 @@ LANGS = {
         "trade_label": "🤝 아이템을 대신 받은 사람 (Officer/Caller 다중선택)",
         "reset_btn": "모든 데이터 초기화 (Reset)",
         "item_col": "아이템 이름",
+        "guild_col": "소속 길드", # NEW
         "looted_col": "획득량",
         "chest_col": "창고 입고됨",
         "miss_col": "누락됨",
@@ -41,8 +42,8 @@ LANGS = {
         5. **결과 확인:** **I The Flying Dutchman I** 길드원이 획득한 아이템만 엄격하게 필터링되어 표시됩니다.
         6. **다국어 지원:** 한국어 클라이언트 사용자와 영어 사용자 로그가 섞여도 자동으로 아이템 이름을 매칭합니다.
         7. **거래 확인:** '개별 감사' 탭에서 오피서 이름을 입력하면 누락된 템이 오피서 창고에 있는지 확인합니다.
-        8. **시간 버퍼 (New):** 사이드바의 Sync Window를 조절해 로거 간 핑 차이로 인한 중복을 방지하세요.
-        9. **데이터 내보내기 (New):** 표 우측 상단의 아이콘을 눌러 검색(돋보기) 및 CSV 다운로드를 할 수 있습니다.
+        8. **시간 버퍼:** 사이드바의 Sync Window를 조절해 로거 간 핑 차이로 인한 중복을 방지하세요.
+        9. **데이터 내보내기:** 표 우측 상단의 아이콘을 눌러 검색(돋보기) 및 CSV 다운로드를 할 수 있습니다.
         """
     },
     "English": {
@@ -58,6 +59,7 @@ LANGS = {
         "trade_label": "🤝 Officer Names (Multiple Selection)",
         "reset_btn": "Clear All Data",
         "item_col": "Item Name",
+        "guild_col": "Guild", # NEW
         "looted_col": "Looted Qty",
         "chest_col": "In Chests",
         "miss_col": "Missing",
@@ -78,8 +80,8 @@ LANGS = {
         5. **Guild Filter:** Strictly filters the logs so ONLY items looted by **I The Flying Dutchman I** members are shown.
         6. **Cross-Language Support:** Automatically matches items between Korean and English game clients (e.g., Cabbage Soup = 양배추 스프).
         7. **Trade Verification:** In the 'Player Audit' tab, enter the Officer's name to automatically verify if missing items were banked by them.
-        8. **Custom Buffer (New):** Adjust the Sync Window in the sidebar to prevent double-counting from laggy logs.
-        9. **Search & Export (New):** Hover over any table to search (magnifying glass) or download as CSV.
+        8. **Custom Buffer:** Adjust the Sync Window in the sidebar to prevent double-counting from laggy logs.
+        9. **Search & Export:** Hover over any table to search (magnifying glass) or download as CSV.
         """
     }
 }
@@ -98,7 +100,7 @@ TRANSLATION_MAP = {
     "대형 채집 포션": "Major Gathering Potion",
     "고스트 헴프": "Ghost Hemp",
     "희귀한 루나이트 광석": "Uncommon Runite Ore",
-    "매 창귀한 루나이트 광석": "Exceptional Runite Ore"
+    "매우 희귀한 루나이트 광석": "Exceptional Runite Ore"
 }
 
 def standardize(item_name):
@@ -184,7 +186,6 @@ if loot_files and chest_files:
                 default_index = i
                 break
         
-        # Display the box, automatically pre-filling with "The Flying dutchman" if found
         second_guild = st.sidebar.selectbox(
             T["second_guild"], 
             options=available_guilds, 
@@ -198,7 +199,8 @@ if loot_files and chest_files:
         else:
             full_raw_loot = full_raw_loot[full_raw_loot['guild'].astype(str).str.contains(TARGET_GUILD, na=False, case=False)].copy()
         
-        loot_df = full_raw_loot.groupby(['time', 'player', 'match_name', 'tier_equiv'], as_index=False)['qty'].max()
+        # ADDED 'guild' to the groupby so it survives deduplication!
+        loot_df = full_raw_loot.groupby(['time', 'player', 'match_name', 'tier_equiv', 'guild'], as_index=False)['qty'].max()
         loot_df = loot_df[loot_df['tier_equiv'] >= min_tier]
 
         # --- PROCESS CHEST ---
@@ -223,10 +225,27 @@ if loot_files and chest_files:
         tab1, tab2, tab3 = st.tabs([T["tab_full"], T["tab_player"], T["tab_history"]])
 
         with tab1:
-            l_sum = loot_df.groupby('match_name').agg({'qty':'sum', 'player': lambda x: ', '.join(set(x))}).reset_index()
+            # Added guild to the Full Report overview
+            l_sum = loot_df.groupby('match_name').agg({
+                'qty':'sum', 
+                'player': lambda x: ', '.join(set(x)),
+                'guild': lambda x: ', '.join(set(x))
+            }).reset_index()
+            
             l_sum['In Chest'] = l_sum['match_name'].map(chest_totals).fillna(0)
             l_sum['Miss'] = l_sum['qty'] - l_sum['In Chest']
-            st.dataframe(l_sum[l_sum['Miss'] > 0].sort_values('Miss', ascending=False), use_container_width=True, hide_index=True)
+            
+            # Rename columns to translated versions for a cleaner look
+            report_df = l_sum[l_sum['Miss'] > 0].sort_values('Miss', ascending=False).rename(columns={
+                'match_name': T["item_col"],
+                'qty': T["looted_col"],
+                'guild': T["guild_col"],
+                'player': T["by_col"],
+                'In Chest': T["chest_col"],
+                'Miss': T["miss_col"]
+            })
+            
+            st.dataframe(report_df, use_container_width=True, hide_index=True)
 
         with tab2:
             ca, cb = st.columns(2)
@@ -234,7 +253,8 @@ if loot_files and chest_files:
             trade_names = cb.multiselect(T["trade_label"], options=sorted(chest_df['player'].dropna().unique()))
             
             if search_p:
-                p_loot = loot_df[loot_df['player'] == search_p].groupby('match_name')['qty'].sum().reset_index()
+                # Grouping by both match_name and getting the first registered guild for the user
+                p_loot = loot_df[loot_df['player'] == search_p].groupby('match_name').agg({'qty':'sum', 'guild':'first'}).reset_index()
                 audit_rows = []
                 for _, row in p_loot.iterrows():
                     in_bank = int(chest_df[(chest_df['player'] == search_p) & (chest_df['match_name'] == row['match_name'])]['qty'].sum())
@@ -252,6 +272,7 @@ if loot_files and chest_files:
                     
                     audit_rows.append({
                         T["item_col"]: row['match_name'], 
+                        T["guild_col"]: row['guild'], # The new Guild column
                         T["looted_col"]: row['qty'], 
                         "Own Bank": in_bank,
                         T["status_col"]: T["banked"] if in_bank >= row['qty'] else T["missing"],
