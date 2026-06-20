@@ -13,6 +13,7 @@ LANGS = {
         "sidebar_head": "1. 설정 및 업로드",
         "loot_label": "전리품 로그 업로드 (.txt)",
         "chest_label": "창고 로그 업로드 (CSV 또는 복사본 TXT)",
+        "second_guild": "➕ 2번째 길드 추가 (자동완성)",
         "tab_full": "전체 리포트 (Full Report)",
         "tab_player": "개별 감사 (Player Audit)",
         "tab_history": "창고 입고 내역 (Chest History)",
@@ -49,6 +50,7 @@ LANGS = {
         "sidebar_head": "1. Settings & Upload",
         "loot_label": "Upload Loot Logs (.txt)",
         "chest_label": "Upload Chest Logs (CSV or Copy-Paste TXT)",
+        "second_guild": "➕ Add 2nd Guild (Auto-fill)",
         "tab_full": "Full Report",
         "tab_player": "Player Audit",
         "tab_history": "Chest History",
@@ -96,7 +98,7 @@ TRANSLATION_MAP = {
     "대형 채집 포션": "Major Gathering Potion",
     "고스트 헴프": "Ghost Hemp",
     "희귀한 루나이트 광석": "Uncommon Runite Ore",
-    "매우 희귀한 루나이트 광석": "Exceptional Runite Ore"
+    "매 창귀한 루나이트 광석": "Exceptional Runite Ore"
 }
 
 def standardize(item_name):
@@ -135,7 +137,7 @@ def robust_read(file):
 # --- 5. SIDEBAR FILTERS ---
 st.sidebar.header("⚙️ Settings")
 min_tier = st.sidebar.slider("Min Tier Equivalent", 1, 12, 4)
-buffer_val = st.sidebar.select_slider("Sync Window (Seconds)", options=[1, 2, 3, 5, 10,360], value=2)
+buffer_val = st.sidebar.select_slider("Sync Window (Seconds)", options=[1, 2, 3, 5, 10], value=2)
 buffer_str = f"{buffer_val}s"
 
 loot_files = st.sidebar.file_uploader(T["loot_label"], type=['txt', 'csv'], accept_multiple_files=True)
@@ -156,29 +158,46 @@ if loot_files and chest_files:
             
             if c_it and c_qty and c_id:
                 temp = df.rename(columns={c_it:'item_raw', c_qty:'qty', c_pl:'player', c_id:'item_id', c_tm:'time'}).copy()
-                
-                # Restore the exact Guild mapping logic
                 if c_gd:
                     temp = temp.rename(columns={c_gd: 'guild'})
                 else:
                     temp['guild'] = TARGET_GUILD
 
                 temp['qty'] = pd.to_numeric(temp['qty'], errors='coerce').fillna(0).astype(int)
-                
-                # Apply standardization and .0 enchant forcing
                 temp['match_name'] = temp['item_raw'].apply(standardize) + " ." + temp['item_id'].apply(get_enchant_val)
                 temp['tier_equiv'] = temp['item_id'].apply(get_tier_equiv)
-                
-                # Apply dynamic time buffer for deduplication
                 temp['time'] = pd.to_datetime(temp['time'], errors='coerce').dt.round(buffer_str)
                 all_loot.append(temp)
         
         full_raw_loot = pd.concat(all_loot, ignore_index=True)
         
-        # RESTORED: Strict Flying Dutchman Guild Filter
-        full_raw_loot = full_raw_loot[full_raw_loot['guild'].astype(str).str.contains(TARGET_GUILD, na=False, case=False)].copy()
+        # --- DYNAMIC 2ND GUILD SELECTION (WITH AUTO-DEFAULT) ---
+        available_guilds = sorted([
+            g for g in full_raw_loot['guild'].dropna().unique() 
+            if str(g).strip() != "" and TARGET_GUILD.lower() not in str(g).lower()
+        ])
         
-        # Deduplicate using the buffer window
+        # Search the logs to see if "The Flying dutchman" is present
+        default_index = None
+        for i, guild_name in enumerate(available_guilds):
+            if "the flying dutchman" in str(guild_name).lower():
+                default_index = i
+                break
+        
+        # Display the box, automatically pre-filling with "The Flying dutchman" if found
+        second_guild = st.sidebar.selectbox(
+            T["second_guild"], 
+            options=available_guilds, 
+            index=default_index, 
+            help="Defaults to 'The Flying dutchman' if it appears in the logs. Click to change."
+        )
+
+        if second_guild:
+            pattern = f"({TARGET_GUILD}|{re.escape(second_guild)})"
+            full_raw_loot = full_raw_loot[full_raw_loot['guild'].astype(str).str.contains(pattern, na=False, case=False)].copy()
+        else:
+            full_raw_loot = full_raw_loot[full_raw_loot['guild'].astype(str).str.contains(TARGET_GUILD, na=False, case=False)].copy()
+        
         loot_df = full_raw_loot.groupby(['time', 'player', 'match_name', 'tier_equiv'], as_index=False)['qty'].max()
         loot_df = loot_df[loot_df['tier_equiv'] >= min_tier]
 
@@ -194,8 +213,6 @@ if loot_files and chest_files:
             if c_it and c_am:
                 df = df.rename(columns={c_it:'item_raw', c_am:'qty', c_pl:'player'})
                 ench_col = pd.to_numeric(df[c_en], errors='coerce').fillna(0).astype(int) if c_en else 0
-                
-                # Apply standardization and .0 enchant forcing
                 df['match_name'] = df['item_raw'].apply(standardize) + " ." + ench_col.astype(str)
                 all_chest.append(df)
         
@@ -209,8 +226,6 @@ if loot_files and chest_files:
             l_sum = loot_df.groupby('match_name').agg({'qty':'sum', 'player': lambda x: ', '.join(set(x))}).reset_index()
             l_sum['In Chest'] = l_sum['match_name'].map(chest_totals).fillna(0)
             l_sum['Miss'] = l_sum['qty'] - l_sum['In Chest']
-            
-            # Using st.dataframe for Pro Table (Search / Download)
             st.dataframe(l_sum[l_sum['Miss'] > 0].sort_values('Miss', ascending=False), use_container_width=True, hide_index=True)
 
         with tab2:
@@ -222,18 +237,16 @@ if loot_files and chest_files:
                 p_loot = loot_df[loot_df['player'] == search_p].groupby('match_name')['qty'].sum().reset_index()
                 audit_rows = []
                 for _, row in p_loot.iterrows():
-                    # Check player's own bank
                     in_bank = int(chest_df[(chest_df['player'] == search_p) & (chest_df['match_name'] == row['match_name'])]['qty'].sum())
                     
                     v_status = "---"
-                    is_accounted = (in_bank >= row['qty']) 
+                    is_accounted = (in_bank >= row['qty'])
                     
-                    # Check selected officers if missing from own bank
                     if not is_accounted and trade_names:
                         off_matches = chest_df[(chest_df['player'].isin(trade_names)) & (chest_df['match_name'] == row['match_name']) & (chest_df['qty'] > 0)].groupby('player')['qty'].sum()
                         if not off_matches.empty:
                             v_status = "✅ Team: " + ", ".join([f"{n} ({int(a)})" for n, a in off_matches.items()])
-                            is_accounted = True 
+                            is_accounted = True
                         else:
                             v_status = "❌ Not found in selection"
                     
@@ -244,10 +257,9 @@ if loot_files and chest_files:
                         T["status_col"]: T["banked"] if in_bank >= row['qty'] else T["missing"],
                         "Officer Match": v_status,
                         T["audit_col"]: "None",
-                        "_sort_priority": 0 if is_accounted else 1 # Logic: 0 = Top, 1 = Bottom
+                        "_sort_priority": 0 if is_accounted else 1
                     })
                 
-                # Convert to DataFrame, sort by priority, then remove the hidden column
                 audit_df = pd.DataFrame(audit_rows).sort_values("_sort_priority").drop(columns=["_sort_priority"])
                 
                 st.data_editor(
@@ -258,27 +270,10 @@ if loot_files and chest_files:
                 )
 
         with tab3:
-            # RESTORED: Chest History Tab from earlier response
-            search_hist = st.selectbox(
-                T["search_label"], 
-                options=sorted(chest_df['player'].dropna().unique()), 
-                index=None, 
-                key="hist_tab_search"
-            )
-            
+            search_hist = st.selectbox(T["search_label"], options=sorted(chest_df['player'].dropna().unique()), index=None, key="hist_tab_search")
             if search_hist:
                 player_history = chest_df[chest_df['player'] == search_hist][['match_name', 'qty']].copy()
-                player_history = player_history.sort_values('match_name')
-                
-                st.dataframe(
-                    player_history, 
-                    use_container_width=True, 
-                    hide_index=True,
-                    column_config={
-                        "match_name": "Item Name",
-                        "qty": "Quantity Deposited"
-                    }
-                )
+                st.dataframe(player_history.sort_values('match_name'), use_container_width=True, hide_index=True)
             else:
                 st.info("Select a player from the dropdown above to view their chest deposit history.")
 
