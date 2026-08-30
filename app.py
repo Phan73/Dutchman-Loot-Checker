@@ -39,7 +39,7 @@ LANGS = {
         "banked": "✅ 본인 입고",
         "missing": "❌ 미입고",
         "req_both": "⚠️ 이 기능을 사용하려면 **전리품 로그**와 **창고 로그**가 모두 필요합니다.",
-        "req_chest": "⚠️ 이 기능을 사용하려면 **창고 로그**를 업로드하세요.",
+        "req_chest": "⚠️ 이 기능을 사용하려면 올바른 형식의 **창고 로그**를 업로드하세요.",
         "instruction_head": "📖 상세 사용 방법 (Usage Guide)",
         "instructions": """
         ### 📋 감사 도구 사용 가이드
@@ -82,7 +82,7 @@ LANGS = {
         "banked": "✅ Self Banked",
         "missing": "❌ Missing",
         "req_both": "⚠️ Both **Loot Logs** and **Chest Logs** are required to view this section.",
-        "req_chest": "⚠️ Please upload **Chest Logs** to view this section.",
+        "req_chest": "⚠️ Please upload a valid **Chest Log** to view this section.",
         "instruction_head": "📖 Detailed Instructions",
         "instructions": """
         ### 📋 How to use the Audit Tool
@@ -182,6 +182,8 @@ if loot_files or chest_files:
                     temp['tier_equiv'] = temp['item_id'].apply(get_tier_equiv)
                     temp['time'] = pd.to_datetime(temp['time'], errors='coerce').dt.round(buffer_str)
                     all_loot.append(temp)
+                else:
+                    st.sidebar.error(f"⚠️ Could not detect required columns (Item, Quantity) in Loot File: {f.name}")
             
             if all_loot:
                 full_raw_loot = pd.concat(all_loot, ignore_index=True)
@@ -209,12 +211,13 @@ if loot_files or chest_files:
             all_chest = []
             for f in chest_files:
                 df = robust_read(f)
-                c_it = find_best_column(df, ['item', 'itemname'])
-                c_am = find_best_column(df, ['amount', 'quantity'])
-                c_pl = find_best_column(df, ['player', 'user', 'name'])
-                c_en = find_best_column(df, ['enchantment'])
-                c_ac = find_best_column(df, ['action', 'type']) 
-                c_tm = find_best_column(df, ['date', 'time', 'timestamputc']) 
+                # ADDED BROAD SYNONYMS FOR CHEST COLUMNS SO IT CATCHES EVERYTHING
+                c_it = find_best_column(df, ['item', 'itemname', '아이템'])
+                c_am = find_best_column(df, ['amount', 'quantity', 'qty', '수량'])
+                c_pl = find_best_column(df, ['player', 'user', 'name', 'character', '플레이어', '캐릭터', '이름'])
+                c_en = find_best_column(df, ['enchantment', '인챈트'])
+                c_ac = find_best_column(df, ['action', 'type', '동작', '작업', '유형']) 
+                c_tm = find_best_column(df, ['date', 'time', 'timestamputc', '시간', '날짜']) 
                 
                 if c_it and c_am:
                     df = df.rename(columns={c_it:'item_raw', c_am:'qty', c_pl:'player'})
@@ -234,6 +237,8 @@ if loot_files or chest_files:
                         
                     df['qty'] = pd.to_numeric(df['qty'], errors='coerce').fillna(0).astype(int)
                     all_chest.append(df)
+                else:
+                    st.sidebar.error(f"⚠️ Could not detect required columns (Item, Amount) in Chest File: {f.name}. Make sure it's exported correctly.")
             
             if all_chest:
                 chest_df = pd.concat(all_chest, ignore_index=True)
@@ -241,7 +246,6 @@ if loot_files or chest_files:
         # --- UI TABS ---
         tab1, tab2, tab3, tab4 = st.tabs([T["tab_full"], T["tab_player"], T["tab_history"], T["tab_ledger"]])
         
-        # Prepare deposits only if chest_df is not empty
         deposits_only = pd.DataFrame()
         chest_totals = {}
         if not chest_df.empty:
@@ -250,7 +254,7 @@ if loot_files or chest_files:
 
         with tab1:
             if loot_df.empty or chest_df.empty:
-                st.warning(T["req_both"])
+                st.info(T["req_both"])
             else:
                 l_sum = loot_df.groupby('match_name').agg({'qty':'sum', 'player': lambda x: ', '.join(set(x)), 'guild': lambda x: ', '.join(set(x))}).reset_index()
                 l_sum['In Chest'] = l_sum['match_name'].map(chest_totals).fillna(0)
@@ -264,7 +268,7 @@ if loot_files or chest_files:
 
         with tab2:
             if loot_df.empty or chest_df.empty:
-                st.warning(T["req_both"])
+                st.info(T["req_both"])
             else:
                 ca, cb = st.columns(2)
                 search_p = ca.selectbox(T["search_label"], options=sorted(loot_df['player'].dropna().unique()), index=None)
@@ -295,7 +299,7 @@ if loot_files or chest_files:
 
         with tab3:
             if chest_df.empty:
-                st.warning(T["req_chest"])
+                st.info(T["req_chest"])
             else:
                 search_hist = st.selectbox(T["search_label"], options=sorted(chest_df['player'].dropna().unique()), index=None, key="hist_tab_search")
                 if search_hist:
@@ -306,7 +310,7 @@ if loot_files or chest_files:
         
         with tab4:
             if chest_df.empty:
-                st.warning(T["req_chest"])
+                st.info(T["req_chest"])
             else:
                 search_ledger = st.selectbox(T["ledger_search"], options=sorted(chest_df['player'].dropna().unique()), index=None)
                 
