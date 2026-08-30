@@ -40,6 +40,11 @@ LANGS = {
         "missing": "❌ 미입고",
         "req_both": "⚠️ 이 기능을 사용하려면 **전리품 로그**와 **창고 로그**가 모두 필요합니다.",
         "req_chest": "⚠️ 이 기능을 사용하려면 올바른 형식의 **창고 로그**를 업로드하세요.",
+        "audit_summary": "📊 감사 요약",
+        "tot_looted": "총 획득량",
+        "tot_banked": "본인 입고량",
+        "tot_missing": "총 누락량",
+        "acc_score": "신용도 (입고율)",
         "instruction_head": "📖 상세 사용 방법 (Usage Guide)",
         "instructions": """
         ### 📋 감사 도구 사용 가이드
@@ -83,6 +88,11 @@ LANGS = {
         "missing": "❌ Missing",
         "req_both": "⚠️ Both **Loot Logs** and **Chest Logs** are required to view this section.",
         "req_chest": "⚠️ Please upload a valid **Chest Log** to view this section.",
+        "audit_summary": "📊 Audit Summary",
+        "tot_looted": "Total Looted",
+        "tot_banked": "Total Banked",
+        "tot_missing": "Total Missing",
+        "acc_score": "Accountability Score",
         "instruction_head": "📖 Detailed Instructions",
         "instructions": """
         ### 📋 How to use the Audit Tool
@@ -211,7 +221,6 @@ if loot_files or chest_files:
             all_chest = []
             for f in chest_files:
                 df = robust_read(f)
-                # ADDED BROAD SYNONYMS FOR CHEST COLUMNS SO IT CATCHES EVERYTHING
                 c_it = find_best_column(df, ['item', 'itemname', '아이템'])
                 c_am = find_best_column(df, ['amount', 'quantity', 'qty', '수량'])
                 c_pl = find_best_column(df, ['player', 'user', 'name', 'character', '플레이어', '캐릭터', '이름'])
@@ -277,9 +286,22 @@ if loot_files or chest_files:
                 if search_p:
                     p_loot = loot_df[loot_df['player'] == search_p].groupby('match_name').agg({'qty':'sum', 'guild':'first'}).reset_index()
                     audit_rows = []
+                    
+                    total_looted = 0
+                    total_banked = 0
+                    total_missing = 0
+
                     for _, row in p_loot.iterrows():
+                        looted_qty = row['qty']
                         in_bank = int(deposits_only[(deposits_only['player'] == search_p) & (deposits_only['match_name'] == row['match_name'])]['qty'].sum())
-                        v_status, is_accounted = "---", (in_bank >= row['qty'])
+                        
+                        # Tally metrics
+                        total_looted += looted_qty
+                        total_banked += in_bank
+                        if looted_qty > in_bank:
+                            total_missing += (looted_qty - in_bank)
+
+                        v_status, is_accounted = "---", (in_bank >= looted_qty)
                         
                         if not is_accounted and trade_names:
                             off_matches = deposits_only[(deposits_only['player'].isin(trade_names)) & (deposits_only['match_name'] == row['match_name']) & (deposits_only['qty'] > 0)].groupby('player')['qty'].sum()
@@ -289,11 +311,25 @@ if loot_files or chest_files:
                             else: v_status = "❌ Not found in selection"
                         
                         audit_rows.append({
-                            T["item_col"]: row['match_name'], T["guild_col"]: row['guild'], T["looted_col"]: row['qty'], 
-                            "Own Bank": in_bank, T["status_col"]: T["banked"] if in_bank >= row['qty'] else T["missing"],
+                            T["item_col"]: row['match_name'], T["guild_col"]: row['guild'], T["looted_col"]: looted_qty, 
+                            "Own Bank": in_bank, T["status_col"]: T["banked"] if in_bank >= looted_qty else T["missing"],
                             "Officer Match": v_status, T["audit_col"]: "None", "_sort_priority": 0 if is_accounted else 1
                         })
                     
+                    # --- DASHBOARD SUMMARY ---
+                    st.divider()
+                    st.markdown(f"### {T['audit_summary']}: **{search_p}**")
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    col1.metric(T["tot_looted"], f"{total_looted:,}")
+                    col2.metric(T["tot_banked"], f"{total_banked:,}")
+                    col3.metric(T["tot_missing"], f"{total_missing:,}")
+                    
+                    acc_score = 100 if total_looted == 0 else min(100, int((total_banked / total_looted) * 100))
+                    col4.metric(T["acc_score"], f"{acc_score}%")
+                    st.divider()
+                    
+                    # --- AUDIT TABLE ---
                     audit_df = pd.DataFrame(audit_rows).sort_values("_sort_priority").drop(columns=["_sort_priority"])
                     st.data_editor(audit_df, use_container_width=True, hide_index=True, column_config={T["audit_col"]: st.column_config.SelectboxColumn(options=["None", "Died", "Traded", "Penalty"])})
 
