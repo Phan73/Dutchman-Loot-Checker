@@ -238,13 +238,18 @@ if loot_files or chest_files:
                     if c_tm: df = df.rename(columns={c_tm: 'time'})
                     else: df['time'] = 'Unknown Time'
 
+                    # Ensure quantity is converted safely, keeping absolute values for calculation
+                    df['qty'] = pd.to_numeric(df['qty'], errors='coerce').fillna(0).astype(int)
+
                     if c_ac:
                         is_withdraw = df[c_ac].astype(str).str.contains('with|출', case=False, na=False)
                         df['action'] = ['Withdraw' if w else 'Deposit' for w in is_withdraw]
                     else:
-                        df['action'] = 'Deposit'
-                        
-                    df['qty'] = pd.to_numeric(df['qty'], errors='coerce').fillna(0).astype(int)
+                        # Fallback: if quantity is negative, assume withdrawal, otherwise deposit
+                        df['action'] = ['Withdraw' if q < 0 else 'Deposit' for q in df['qty']]
+                    
+                    # Make quantities absolute for clean tabular viewing while action defines its type
+                    df['qty'] = df['qty'].abs()
                     all_chest.append(df)
                 else:
                     st.sidebar.error(f"⚠️ Could not detect required columns (Item, Amount) in Chest File: {f.name}. Make sure it's exported correctly.")
@@ -295,7 +300,6 @@ if loot_files or chest_files:
                         looted_qty = row['qty']
                         in_bank = int(deposits_only[(deposits_only['player'] == search_p) & (deposits_only['match_name'] == row['match_name'])]['qty'].sum())
                         
-                        # Tally metrics
                         total_looted += looted_qty
                         total_banked += in_bank
                         if looted_qty > in_bank:
@@ -316,7 +320,6 @@ if loot_files or chest_files:
                             "Officer Match": v_status, T["audit_col"]: "None", "_sort_priority": 0 if is_accounted else 1
                         })
                     
-                    # --- DASHBOARD SUMMARY ---
                     st.divider()
                     st.markdown(f"### {T['audit_summary']}: **{search_p}**")
                     col1, col2, col3, col4 = st.columns(4)
@@ -329,7 +332,6 @@ if loot_files or chest_files:
                     col4.metric(T["acc_score"], f"{acc_score}%")
                     st.divider()
                     
-                    # --- AUDIT TABLE ---
                     audit_df = pd.DataFrame(audit_rows).sort_values("_sort_priority").drop(columns=["_sort_priority"])
                     st.data_editor(audit_df, use_container_width=True, hide_index=True, column_config={T["audit_col"]: st.column_config.SelectboxColumn(options=["None", "Died", "Traded", "Penalty"])})
 
@@ -353,8 +355,9 @@ if loot_files or chest_files:
                 if search_ledger:
                     p_ledger = chest_df[chest_df['player'] == search_ledger].copy()
                     
-                    dep_count = p_ledger[p_ledger['action'] == 'Deposit']['qty'].sum()
-                    with_count = p_ledger[p_ledger['action'] == 'Withdraw']['qty'].sum()
+                    # Fix: Calculate total deposits and total withdrawals separately using positive absolute quantities filtered by action
+                    dep_count = int(p_ledger[p_ledger['action'] == 'Deposit']['qty'].sum())
+                    with_count = int(p_ledger[p_ledger['action'] == 'Withdraw']['qty'].sum())
                     net_count = dep_count - with_count
                     
                     m1, m2, m3 = st.columns(3)
